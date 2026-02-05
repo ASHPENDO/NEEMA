@@ -1,0 +1,13 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: postika
+      POSTGRES_USER: postika
+      POSTGRES_PASSWORD: postika
+    ports:
+      - "5432:5432"
+    volumes:
+      - postika_pg:/var/lib/postgresql/data
+volumes:
+  postika_pg:
