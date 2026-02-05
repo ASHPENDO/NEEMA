@@ -1,0 +1,15 @@
+{
+  "name": "POSTIKA",
+  "image": "mcr.microsoft.com/devcontainers/python:3.12",
+  "remoteUser": "vscode",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "esbenp.prettier-vscode"
+      ]
+    }
+  },
+  "postCreateCommand": "cd backend && python -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt"
+}
