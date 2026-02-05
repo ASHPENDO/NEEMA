@@ -2,7 +2,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file="backend/.env", extra="ignore")
+    # When running from backend/, this will find backend/.env
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     DATABASE_URL_ASYNC: str
     DATABASE_URL_SYNC: str
