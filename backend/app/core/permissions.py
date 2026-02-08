@@ -1,0 +1,29 @@
+# backend/app/core/permissions.py
+
+from enum import Enum
+
+
+class TenantPermission(str, Enum):
+    # Team + Settings
+    TEAM_MANAGE = "TEAM_MANAGE"
+    SOCIAL_CONNECT = "SOCIAL_CONNECT"
+    BILLING_MANAGE = "BILLING_MANAGE"
+
+    # Inbox
+    INBOX_VIEW = "INBOX_VIEW"
+    INBOX_REPLY = "INBOX_REPLY"
+    INBOX_ASSIGN = "INBOX_ASSIGN"
+
+    # Posting
+    POST_CREATE = "POST_CREATE"
+    POST_SCHEDULE = "POST_SCHEDULE"
+    POST_PUBLISH = "POST_PUBLISH"
+    POST_APPROVE = "POST_APPROVE"
+
+    # Analytics
+    ANALYTICS_VIEW = "ANALYTICS_VIEW"
+    ANALYTICS_EXPORT = "ANALYTICS_EXPORT"
+
+    # Catalog
+    CATALOG_EDIT = "CATALOG_EDIT"
+    CATALOG_BULK_UPLOAD = "CATALOG_BULK_UPLOAD"

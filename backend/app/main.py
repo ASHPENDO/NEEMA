@@ -4,6 +4,7 @@ from app.core.config import settings  # noqa: F401
 import app.models  # noqa: F401  # force model registration
 
 from app.api.v1.auth import router as auth_router
+from app.api.v1.tenants import router as tenants_router
 
 
 def create_application() -> FastAPI:
@@ -13,7 +14,10 @@ def create_application() -> FastAPI:
     def root():
         return {"status": "ok", "service": "postika"}
 
+    # Routers
     app.include_router(auth_router, prefix="/api/v1")
+    app.include_router(tenants_router, prefix="/api/v1")
+
     return app
 
 
