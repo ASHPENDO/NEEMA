@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, EmailStr
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +20,18 @@ from app.models.user import User
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 MAGIC_CODE_EXPIRY_MINUTES = 10
+
+
+# -----------------------------
+# Swagger-friendly request models
+# -----------------------------
+class MagicCodeRequest(BaseModel):
+    email: EmailStr
+
+
+class MagicCodeVerify(BaseModel):
+    email: EmailStr
+    code: str
 
 
 def _utcnow() -> datetime:
@@ -38,15 +52,13 @@ async def purge_expired_magic_codes(db: AsyncSession) -> None:
 
 
 @router.post("/request-code")
-async def request_code(payload: dict, db: AsyncSession = Depends(get_db)):
+async def request_code(payload: MagicCodeRequest, db: AsyncSession = Depends(get_db)):
     """
     Body: {"email": "user@example.com"}
     Generates a magic code (currently stored on user record).
-    In dev it may be logged/returned depending on your earlier setup.
+    Dev-only: returns code in response to simplify Swagger testing.
     """
-    email = (payload.get("email") or "").strip().lower()
-    if not email:
-        raise HTTPException(status_code=400, detail="email is required")
+    email = payload.email.strip().lower()
 
     await purge_expired_magic_codes(db)
 
@@ -58,10 +70,6 @@ async def request_code(payload: dict, db: AsyncSession = Depends(get_db)):
         db.add(user)
         await db.flush()
 
-    # Generate a short numeric-ish code (simple + effective for dev)
-    # If your User model already has a helper, you can swap this out.
-    import secrets
-
     code = str(secrets.randbelow(900000) + 100000)  # 6 digits
     expires_at = _utcnow() + timedelta(minutes=MAGIC_CODE_EXPIRY_MINUTES)
 
@@ -70,22 +78,20 @@ async def request_code(payload: dict, db: AsyncSession = Depends(get_db)):
 
     await db.commit()
 
-    # Dev behavior: return code so Swagger testing is easy.
-    # Later you will replace this with real email delivery.
     return {"status": "ok", "expires_in_minutes": MAGIC_CODE_EXPIRY_MINUTES, "code": code}
 
 
 @router.post("/verify-code")
-async def verify_code(payload: dict, db: AsyncSession = Depends(get_db)):
+async def verify_code(payload: MagicCodeVerify, db: AsyncSession = Depends(get_db)):
     """
     Body: {"email":"user@example.com","code":"123456"}
     Returns: access_token
     """
-    email = (payload.get("email") or "").strip().lower()
-    code = (payload.get("code") or "").strip()
+    email = payload.email.strip().lower()
+    code = payload.code.strip()
 
-    if not email or not code:
-        raise HTTPException(status_code=400, detail="email and code are required")
+    if not code:
+        raise HTTPException(status_code=400, detail="code is required")
 
     await purge_expired_magic_codes(db)
 
@@ -106,10 +112,10 @@ async def verify_code(payload: dict, db: AsyncSession = Depends(get_db)):
     user.magic_code_expires_at = None
     await db.commit()
 
-    # Standard JWT: sub=user_id
+    # FIX: create_access_token expects (subject, expires_minutes)
     access_token = create_access_token(
-        data={"sub": str(user.id)},
-        expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
+        subject=str(user.id),
+        expires_minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES,
     )
 
     return {"access_token": access_token, "token_type": "bearer"}
@@ -123,9 +129,10 @@ async def get_current_user(
     Dependency for protected endpoints.
     """
     token = credentials.credentials
-    payload = decode_access_token(token)
 
-    user_id = payload.get("sub")
+    # IMPORTANT: decode_access_token returns the 'sub' string, not the full payload
+    user_id = decode_access_token(token)
+
     if not user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 

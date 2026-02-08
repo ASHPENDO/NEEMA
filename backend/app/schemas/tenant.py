@@ -9,6 +9,21 @@ class TenantCreate(BaseModel):
     name: str = Field(min_length=2, max_length=200)
     tier: str = Field(default="sungura")
 
+    # Onboarding / compliance fields
+    accepted_terms: bool = Field(
+        ...,
+        description="Must be true to create a tenant (ToS acceptance is required).",
+    )
+    notifications_opt_in: Optional[bool] = Field(
+        default=None,
+        description="Optional: whether the user opts in to notifications.",
+    )
+    referral_code: Optional[str] = Field(
+        default=None,
+        description="Optional: referral code used during onboarding.",
+        max_length=64,
+    )
+
 
 class TenantOut(BaseModel):
     id: UUID
