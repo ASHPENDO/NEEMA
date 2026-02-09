@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timedelta, timezone
 import secrets
 
@@ -112,7 +113,6 @@ async def verify_code(payload: MagicCodeVerify, db: AsyncSession = Depends(get_d
     user.magic_code_expires_at = None
     await db.commit()
 
-    # FIX: create_access_token expects (subject, expires_minutes)
     access_token = create_access_token(
         subject=str(user.id),
         expires_minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES,
@@ -129,14 +129,21 @@ async def get_current_user(
     Dependency for protected endpoints.
     """
     token = credentials.credentials
-
-    # IMPORTANT: decode_access_token returns the 'sub' string, not the full payload
-    user_id = decode_access_token(token)
+    user_id = decode_access_token(token)  # returns sub string
 
     if not user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
-    user = await db.get(User, user_id)
+    # Normalize to UUID (important for UUID primary keys)
+    try:
+        user_uuid = uuid.UUID(str(user_id))
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token subject",
+        )
+
+    user = await db.get(User, user_uuid)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
 
