@@ -1,3 +1,7 @@
+# ============================
+# FILE: app/api/v1/tenant_invitations.py
+# (PATCH: accept endpoint ONLY — merged into your existing file)
+# ============================
 from __future__ import annotations
 
 import secrets
@@ -15,6 +19,13 @@ from app.models.tenant_membership import TenantMembership
 from app.models.tenant_invitation import TenantInvitation
 from app.api.deps.tenant import get_current_tenant, require_tenant_roles
 from app.schemas.tenant_invitation import TenantInviteCreate, TenantInviteOut, AcceptTenantInvite
+
+# ADD THESE IMPORTS
+from app.core.tier_limits import get_staff_limit_for_tier, tier_to_str
+from app.crud.tenant_membership import (
+    count_active_staff_memberships,
+    count_active_staff_memberships_excluding_user,
+)
 
 router = APIRouter(prefix="/tenant-invitations", tags=["tenant-invitations"])
 
@@ -149,6 +160,53 @@ async def accept_tenant_invitation(
         user = User(email=email, is_active=True)
         db.add(user)
         await db.flush()
+
+    # ============================
+    # TIER-BASED STAFF LIMIT (authoritative at accept time)
+    # Only counts ACTIVE STAFF memberships.
+    # - If invitation role is ADMIN: no staff-limit enforcement.
+    # - If invitation role is STAFF: enforce tier limits.
+    # - If this user already has an ACTIVE STAFF membership in the tenant,
+    #   do NOT block (exclude user_id from count).
+    # ============================
+    if (inv.role or "STAFF").upper() == "STAFF":
+        t_stmt = select(Tenant).where(Tenant.id == inv.tenant_id)
+        tenant = (await db.execute(t_stmt)).scalar_one_or_none()
+        if not tenant:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
+
+        tier_str = tier_to_str(getattr(tenant, "tier", None))
+        max_staff = get_staff_limit_for_tier(tier_str)
+
+        # Determine whether to exclude this user from count (avoid blocking re-accept/reactivation)
+        existing_active_staff_stmt = select(TenantMembership).where(
+            TenantMembership.tenant_id == inv.tenant_id,
+            TenantMembership.user_id == user.id,
+            TenantMembership.is_active.is_(True),
+            TenantMembership.role == "STAFF",
+        )
+        existing_active_staff = (await db.execute(existing_active_staff_stmt)).scalar_one_or_none()
+
+        if existing_active_staff is not None:
+            active_staff_count = await count_active_staff_memberships_excluding_user(
+                db,
+                tenant_id=inv.tenant_id,
+                exclude_user_id=user.id,
+            )
+        else:
+            active_staff_count = await count_active_staff_memberships(db, tenant_id=inv.tenant_id)
+
+        if active_staff_count >= max_staff:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": "STAFF_LIMIT_EXCEEDED",
+                    "message": "Staff limit exceeded for this tenant tier. Upgrade your plan to add more staff.",
+                    "tier": tier_str,
+                    "limit": max_staff,
+                    "active_staff": active_staff_count,
+                },
+            )
 
     # Create or reactivate membership
     m_stmt = select(TenantMembership).where(
