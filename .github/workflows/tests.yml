@@ -2,9 +2,9 @@ name: Tests
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
 
 jobs:
   pytest:
@@ -26,8 +26,8 @@ jobs:
           --health-retries 5
 
     env:
-  DATABASE_URL_ASYNC: postgresql+asyncpg://postgres:postgres@localhost:5432/postika_test
-  DATABASE_URL_SYNC: postgresql://postgres:postgres@localhost:5432/postika_test
+      DATABASE_URL_ASYNC: postgresql+asyncpg://postgres:postgres@localhost:5432/postika_test
+      DATABASE_URL_SYNC: postgresql://postgres:postgres@localhost:5432/postika_test
 
     steps:
       - name: Checkout
@@ -44,12 +44,10 @@ jobs:
         working-directory: backend
         run: |
           python -m venv .venv
-          . .venv/bin/activate
-          pip install -U pip
-          pip install -r requirements.txt
+          .venv/bin/python -m pip install -U pip
+          .venv/bin/python -m pip install -r requirements.txt
 
       - name: Run tests
         working-directory: backend
         run: |
-          . .venv/bin/activate
-          pytest -q
+          .venv/bin/python -m pytest
