@@ -18,16 +18,17 @@ jobs:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: postika_test
         ports:
-          - 5432:5432
+          - "5432:5432"
         options: >-
-          --health-cmd "pg_isready -U postgres"
+          --health-cmd "pg_isready -U postgres -d postika_test"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
 
     env:
-      DATABASE_URL_ASYNC: postgresql+asyncpg://postgres:postgres@localhost:5432/postika_test
-      DATABASE_URL_SYNC: postgresql://postgres:postgres@localhost:5432/postika_test
+      # Use the service hostname "postgres" (most reliable in GitHub Actions)
+      DATABASE_URL_ASYNC: postgresql+asyncpg://postgres:postgres@postgres:5432/postika_test
+      DATABASE_URL_SYNC: postgresql://postgres:postgres@postgres:5432/postika_test
 
     steps:
       - name: Checkout
@@ -50,4 +51,4 @@ jobs:
       - name: Run tests
         working-directory: backend
         run: |
-          .venv/bin/python -m pytest
+          .venv/bin/python -m pytest -q
