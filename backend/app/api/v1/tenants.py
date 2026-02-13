@@ -26,7 +26,6 @@ from app.api.deps.tenant import (
     require_tenant_roles,
 )
 from app.crud.tenant_membership import (
-    count_active_staff_memberships,
     count_active_staff_memberships_excluding_user,
 )
 
@@ -34,13 +33,17 @@ router = APIRouter(prefix="/tenants", tags=["tenants"])
 
 INVITE_EXPIRY_DAYS = 7
 
+# STAFF limits (owner does NOT count)
 TIER_STAFF_LIMITS = {
     "sungura": 1,
-    "swara": 5,
+    "swara": 6,
     "ndovu": 10,
 }
 
 
+# ---------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -50,20 +53,19 @@ def normalize_email(email: str) -> str:
 
 
 def _tier_staff_limit(tier: str) -> int:
-    # Default to most permissive if tier unknown (but better to keep strict in prod).
     return TIER_STAFF_LIMITS.get((tier or "").strip().lower(), 10)
 
 
 def _upgrade_hint(limit: int) -> str:
     if limit <= 1:
-        return "Upgrade to Swara (5 staff) or Ndovu (10 staff) to add more staff."
-    if limit <= 5:
+        return "Upgrade to Swara (6 staff) or Ndovu (10 staff) to add more staff."
+    if limit <= 6:
         return "Upgrade to Ndovu (10 staff) to add more staff."
     return "Upgrade your tier to add more staff."
 
 
 # ---------------------------------------------------------
-# Tenant creation (NOT scoped — tenant does not exist yet)
+# Tenant creation
 # ---------------------------------------------------------
 @router.post("", response_model=TenantOut)
 async def create_tenant(
@@ -79,7 +81,7 @@ async def create_tenant(
 
     tenant = Tenant(name=payload.name, tier=payload.tier)
     db.add(tenant)
-    await db.flush()  # get tenant.id
+    await db.flush()
 
     membership = TenantMembership(
         tenant_id=tenant.id,
@@ -99,7 +101,7 @@ async def create_tenant(
 
 
 # ---------------------------------------------------------
-# Tenant scoping proof endpoints (Phase 1)
+# Tenant scoped endpoints
 # ---------------------------------------------------------
 @router.get("/current", response_model=TenantOut)
 async def get_current_tenant_route(
@@ -125,9 +127,6 @@ async def get_my_membership_in_current_tenant(
     }
 
 
-# ---------------------------------------------------------
-# RBAC proof endpoint (Phase 2 starts here)
-# ---------------------------------------------------------
 @router.get("/admin-only")
 async def admin_only_check(
     _membership: TenantMembership = Depends(require_tenant_roles("OWNER", "ADMIN")),
@@ -136,7 +135,7 @@ async def admin_only_check(
 
 
 # =========================================================
-# A) TENANT INVITATIONS (STAFF) + B) TIER STAFF LIMITS
+# TENANT INVITATIONS (STAFF + ADMIN)
 # =========================================================
 
 @router.post(
@@ -151,11 +150,10 @@ async def create_tenant_invitation(
     _membership: TenantMembership = Depends(require_tenant_roles("OWNER", "ADMIN")),
 ):
     """
-    Tenant invites staff/admin to their tenant.
-
-    For STAFF: enforce tier-based staff limit at invite creation time.
-    For ADMIN: no staff-limit enforcement (ADMIN is not counted as STAFF).
+    Staff slots are consumed ONLY when accepted.
+    Therefore, we DO NOT enforce staff limits at invite creation.
     """
+
     role = (payload.role or "STAFF").strip().upper()
     if role not in {"ADMIN", "STAFF"}:
         raise HTTPException(
@@ -164,22 +162,6 @@ async def create_tenant_invitation(
         )
 
     email = normalize_email(str(payload.email))
-
-    # Enforce tier staff limit for STAFF invites (prevents sending invites when full)
-    if role == "STAFF":
-        limit = _tier_staff_limit(str(tenant.tier))
-        current_staff = await count_active_staff_memberships(db, tenant.id)
-        if current_staff >= limit:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "message": f"Staff limit reached for tier '{tenant.tier}'.",
-                    "tier": tenant.tier,
-                    "limit": limit,
-                    "current_active_staff": current_staff,
-                    "upgrade_hint": _upgrade_hint(limit),
-                },
-            )
 
     token = secrets.token_urlsafe(48)
     expires_at = _utcnow() + timedelta(days=INVITE_EXPIRY_DAYS)
@@ -192,6 +174,7 @@ async def create_tenant_invitation(
         token=token,
         expires_at=expires_at,
     )
+
     db.add(inv)
     await db.commit()
     await db.refresh(inv)
@@ -220,15 +203,9 @@ async def accept_tenant_invitation(
     user: User = Depends(get_current_user),
 ):
     """
-    Staff follows invite link, signs in via magic code, then calls accept.
-
-    Hardening:
-    - token must exist and not be expired
-    - invitation email must match signed-in user email (prevents token sharing)
-    - idempotent accept (if already accepted by this user, return ok)
-    - membership upsert
-    - tier staff limit enforced at acceptance too (handles race: staff filled after invite sent)
+    Staff slot is consumed HERE (on accept).
     """
+
     if payload.accept_tos is not True:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -237,52 +214,49 @@ async def accept_tenant_invitation(
 
     token = payload.token.strip()
     if not token:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="token is required")
+        raise HTTPException(status_code=400, detail="token is required")
 
     stmt = select(TenantInvitation).where(TenantInvitation.token == token)
     res = await db.execute(stmt)
-    inv: TenantInvitation | None = res.scalar_one_or_none()
-    if inv is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitation not found")
+    inv = res.scalar_one_or_none()
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invitation not found")
 
     now = _utcnow()
-    if inv.expires_at < now:
-        raise HTTPException(status_code=status.HTTP_410_GONE, detail="Invitation has expired")
 
-    # Prevent token sharing: invitation email must match authenticated user's email
+    if inv.expires_at < now:
+        raise HTTPException(status_code=410, detail="Invitation has expired")
+
     user_email = normalize_email(getattr(user, "email", "") or "")
     if user_email != normalize_email(inv.email):
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=403,
             detail="Invitation email does not match the authenticated user",
         )
 
-    # If already accepted by this user: idempotent OK
-    if inv.accepted_at is not None and inv.accepted_by_user_id == user.id:
+    if inv.accepted_at and inv.accepted_by_user_id == user.id:
         return {"ok": True, "tenant_id": str(inv.tenant_id), "status": "already_accepted"}
 
-    # Load tenant for tier limit check and membership creation
     tenant_stmt = select(Tenant).where(Tenant.id == inv.tenant_id)
     tenant_res = await db.execute(tenant_stmt)
-    tenant: Tenant | None = tenant_res.scalar_one_or_none()
-    if tenant is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
+    tenant = tenant_res.scalar_one_or_none()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
 
     invited_role = (inv.role or "STAFF").strip().upper()
 
-    # Enforce tier staff limit for STAFF accepts (race-safe)
+    # Enforce staff limit HERE
     if invited_role == "STAFF":
         limit = _tier_staff_limit(str(tenant.tier))
-
-        # If user already active STAFF in this tenant, don't block (idempotent/reactivation safe)
         staff_count_excl = await count_active_staff_memberships_excluding_user(
             db=db,
             tenant_id=tenant.id,
             exclude_user_id=user.id,
         )
+
         if staff_count_excl >= limit:
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
+                status_code=409,
                 detail={
                     "message": f"Staff limit reached for tier '{tenant.tier}'.",
                     "tier": tenant.tier,
@@ -292,13 +266,12 @@ async def accept_tenant_invitation(
                 },
             )
 
-    # Upsert membership (tenant_id + user_id is unique)
     mem_stmt = select(TenantMembership).where(
         TenantMembership.tenant_id == tenant.id,
         TenantMembership.user_id == user.id,
     )
     mem_res = await db.execute(mem_stmt)
-    membership: TenantMembership | None = mem_res.scalar_one_or_none()
+    membership = mem_res.scalar_one_or_none()
 
     if membership is None:
         membership = TenantMembership(
@@ -313,14 +286,12 @@ async def accept_tenant_invitation(
         )
         db.add(membership)
     else:
-        # Update existing membership for this tenant/user
         membership.role = invited_role
         membership.permissions = inv.permissions or []
         membership.is_active = True
         membership.accepted_terms = True
         membership.notifications_opt_in = payload.accept_notifications
 
-    # Mark invitation accepted
     inv.accepted_at = now
     inv.accepted_by_user_id = user.id
 
