@@ -25,15 +25,17 @@ import app.models  # noqa: F401
 # ---------------------------------------------------------
 # Event loop (single loop for whole test session)
 # ---------------------------------------------------------
-@pytest.fixture(scope="session")
+@pytest_asyncio.fixture(scope="session")
 def event_loop():
     """
     Use ONE event loop for the whole test session.
-    Avoids scope mismatch with session-scoped async fixtures.
+    This MUST match asyncio_default_fixture_loop_scope=session in pytest.ini
     """
     loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
+    try:
+        yield loop
+    finally:
+        loop.close()
 
 
 # ---------------------------------------------------------
@@ -55,7 +57,7 @@ def test_schema_name() -> str:
 
 
 # ---------------------------------------------------------
-# Engine + schema lifecycle
+# Engine + schema lifecycle (CI-safe with retry)
 # ---------------------------------------------------------
 @pytest_asyncio.fixture(scope="session")
 async def engine(database_url_async: str, test_schema_name: str):
@@ -67,6 +69,28 @@ async def engine(database_url_async: str, test_schema_name: str):
         connect_args={"server_settings": {"search_path": test_schema_name}},
     )
 
+    # ------------------------------
+    # Wait/retry for DB readiness
+    # ------------------------------
+    last_exc = None
+    for _ in range(30):  # ~30 seconds max wait
+        try:
+            async with engine.begin() as conn:
+                await conn.execute(text("SELECT 1"))
+            last_exc = None
+            break
+        except Exception as e:
+            last_exc = e
+            await asyncio.sleep(1)
+
+    if last_exc is not None:
+        raise RuntimeError(
+            f"Database not reachable for tests: {last_exc}"
+        ) from last_exc
+
+    # ------------------------------
+    # Create isolated test schema
+    # ------------------------------
     async with engine.begin() as conn:
         await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{test_schema_name}"'))
         await conn.execute(text(f'SET search_path TO "{test_schema_name}"'))
@@ -74,6 +98,9 @@ async def engine(database_url_async: str, test_schema_name: str):
 
     yield engine
 
+    # ------------------------------
+    # Teardown: drop schema
+    # ------------------------------
     async with engine.begin() as conn:
         await conn.execute(text(f'DROP SCHEMA IF EXISTS "{test_schema_name}" CASCADE'))
 
