@@ -20,12 +20,14 @@ from app.models.tenant_invitation import TenantInvitation
 from app.api.deps.tenant import get_current_tenant, require_tenant_roles
 from app.schemas.tenant_invitation import TenantInviteCreate, TenantInviteOut, AcceptTenantInvite
 
-# ADD THESE IMPORTS
 from app.core.tier_limits import get_staff_limit_for_tier, tier_to_str
 from app.crud.tenant_membership import (
     count_active_staff_memberships,
     count_active_staff_memberships_excluding_user,
 )
+
+# ✅ ADD THIS IMPORT
+from app.core.tier_resolver import resolve_effective_tier
 
 router = APIRouter(prefix="/tenant-invitations", tags=["tenant-invitations"])
 
@@ -175,7 +177,8 @@ async def accept_tenant_invitation(
         if not tenant:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
 
-        tier_str = tier_to_str(getattr(tenant, "tier", None))
+        # ✅ CHANGED: use billing-aware effective tier resolver
+        tier_str = resolve_effective_tier(tenant)
         max_staff = get_staff_limit_for_tier(tier_str)
 
         # Determine whether to exclude this user from count (avoid blocking re-accept/reactivation)
