@@ -1,10 +1,8 @@
-# backend/app/models/tenant_membership.py
-
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, Boolean, DateTime, ForeignKey, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID, ARRAY
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, UniqueConstraint
+from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
@@ -15,9 +13,13 @@ class TenantMembership(Base):
     __tablename__ = "tenant_memberships"
     __table_args__ = (
         UniqueConstraint("tenant_id", "user_id", name="uq_tenant_memberships_tenant_user"),
+        Index("ix_tenant_memberships_tenant_role", "tenant_id", "role"),
+        Index("ix_tenant_memberships_user", "user_id"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
 
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -34,16 +36,24 @@ class TenantMembership(Base):
     role: Mapped[str] = mapped_column(String(30), nullable=False, default="STAFF")
 
     # Checkbox permissions
-    permissions: Mapped[list[str]] = mapped_column(ARRAY(String()), nullable=False, default=list)
+    permissions: Mapped[list[str]] = mapped_column(
+        ARRAY(String()), nullable=False, default=list
+    )
 
     # Onboarding / compliance
-    accepted_terms: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    notifications_opt_in: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=None)
+    accepted_terms: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    notifications_opt_in: Mapped[bool | None] = mapped_column(
+        Boolean, nullable=True, default=None
+    )
     referral_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

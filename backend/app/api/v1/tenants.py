@@ -45,6 +45,11 @@ def normalize_email(email: str) -> str:
     return email.strip().lower()
 
 
+def _role_normalize(role: str | None) -> str:
+    r = (role or "STAFF").strip().upper()
+    return r
+
+
 # ---------------------------------------------------------
 # Tenant creation
 # ---------------------------------------------------------
@@ -134,9 +139,15 @@ async def create_tenant_invitation(
     """
     Staff slots are consumed ONLY when accepted.
     Therefore, we DO NOT enforce staff limits at invite creation.
+
+    Hardening:
+    - validate role
+    - normalize + validate email
+    - block duplicate pending invites per tenant+email
+    - block inviting someone already a member (if user exists)
     """
 
-    role = (payload.role or "STAFF").strip().upper()
+    role = _role_normalize(payload.role)
     if role not in {"ADMIN", "STAFF"}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -144,6 +155,46 @@ async def create_tenant_invitation(
         )
 
     email = normalize_email(str(payload.email))
+    if "@" not in email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="email is invalid",
+        )
+
+    # 1) If user already exists and is already a member of this tenant, block.
+    user_stmt = select(User).where(User.email == email).limit(1)
+    user_res = await db.execute(user_stmt)
+    existing_user = user_res.scalar_one_or_none()
+    if existing_user is not None:
+        mem_stmt = (
+            select(TenantMembership)
+            .where(TenantMembership.tenant_id == tenant.id)
+            .where(TenantMembership.user_id == existing_user.id)
+            .limit(1)
+        )
+        mem_res = await db.execute(mem_stmt)
+        if mem_res.scalar_one_or_none() is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="User is already a member of this tenant",
+            )
+
+    # 2) Block duplicate *pending* invitations for same tenant + email.
+    # Pending = accepted_at is NULL and expires_at is in future.
+    pending_stmt = (
+        select(TenantInvitation)
+        .where(TenantInvitation.tenant_id == tenant.id)
+        .where(TenantInvitation.email == email)
+        .where(TenantInvitation.accepted_at.is_(None))
+        .where(TenantInvitation.expires_at > _utcnow())
+        .limit(1)
+    )
+    pending_res = await db.execute(pending_stmt)
+    if pending_res.scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A pending invitation already exists for this email",
+        )
 
     token = secrets.token_urlsafe(48)
     expires_at = _utcnow() + timedelta(days=INVITE_EXPIRY_DAYS)
@@ -188,5 +239,9 @@ async def accept_tenant_invitation(
 
     Authoritative implementation lives at:
       POST /api/v1/tenant-invitations/accept
+
+    IMPORTANT:
+    - Tier staff-slot enforcement MUST live in the authoritative endpoint.
+    - This alias should remain a thin delegate to avoid divergence.
     """
     return await accept_tenant_invitation_authoritative(payload=payload, db=db)
