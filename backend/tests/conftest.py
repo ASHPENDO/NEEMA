@@ -23,31 +23,13 @@ import app.models  # noqa: F401
 
 
 # ---------------------------------------------------------
-# Event loop (single loop for whole test session)
-# ---------------------------------------------------------
-@pytest_asyncio.fixture(scope="session")
-def event_loop():
-    """
-    Use ONE event loop for the whole test session.
-    This MUST match asyncio_default_fixture_loop_scope=session in pytest.ini
-    """
-    loop = asyncio.new_event_loop()
-    try:
-        yield loop
-    finally:
-        loop.close()
-
-
-# ---------------------------------------------------------
 # Database config
 # ---------------------------------------------------------
 @pytest.fixture(scope="session")
 def database_url_async() -> str:
     url = os.getenv("DATABASE_URL_ASYNC")
     if not url:
-        raise RuntimeError(
-            "DATABASE_URL_ASYNC is not set. Set it in your environment/.env."
-        )
+        raise RuntimeError("DATABASE_URL_ASYNC is not set. Set it in your environment/.env.")
     return url
 
 
@@ -84,9 +66,7 @@ async def engine(database_url_async: str, test_schema_name: str):
             await asyncio.sleep(1)
 
     if last_exc is not None:
-        raise RuntimeError(
-            f"Database not reachable for tests: {last_exc}"
-        ) from last_exc
+        raise RuntimeError(f"Database not reachable for tests: {last_exc}") from last_exc
 
     # ------------------------------
     # Create isolated test schema
@@ -109,9 +89,7 @@ async def engine(database_url_async: str, test_schema_name: str):
 
 @pytest.fixture(scope="session")
 def sessionmaker(engine):
-    return async_sessionmaker(
-        engine, class_=AsyncSession, expire_on_commit=False
-    )
+    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
 # ---------------------------------------------------------
@@ -130,12 +108,8 @@ async def _truncate_tables(engine, test_schema_name: str):
 
         table_names = [t.name for t in Base.metadata.sorted_tables]
         if table_names:
-            qualified = ", ".join(
-                f'"{test_schema_name}"."{name}"' for name in table_names
-            )
-            await conn.execute(
-                text(f"TRUNCATE TABLE {qualified} RESTART IDENTITY CASCADE;")
-            )
+            qualified = ", ".join(f'"{test_schema_name}"."{name}"' for name in table_names)
+            await conn.execute(text(f"TRUNCATE TABLE {qualified} RESTART IDENTITY CASCADE;"))
 
     yield
 
