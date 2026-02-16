@@ -18,6 +18,7 @@ from app.api.deps.tenant import (
     require_tenant_roles,
 )
 from app.db.session import get_db
+from app.models.salesperson_profile import SalespersonProfile  # ✅ NEW
 from app.models.tenant import Tenant
 from app.models.tenant_invitation import TenantInvitation
 from app.models.tenant_membership import TenantMembership
@@ -50,6 +51,13 @@ def _role_normalize(role: str | None) -> str:
     return r
 
 
+def _normalize_referral_code(code: str | None) -> str | None:
+    if code is None:
+        return None
+    c = code.strip().upper()
+    return c or None
+
+
 # ---------------------------------------------------------
 # Tenant creation
 # ---------------------------------------------------------
@@ -65,7 +73,30 @@ async def create_tenant(
             detail="accepted_terms must be true to create a tenant",
         )
 
-    tenant = Tenant(name=payload.name, tier=payload.tier)
+    # ✅ Resolve referral code -> salesperson attribution (optional, but validated if provided)
+    referral_code = _normalize_referral_code(payload.referral_code)
+    salesperson_profile_id = None
+
+    if referral_code is not None:
+        sp_stmt = (
+            select(SalespersonProfile)
+            .where(SalespersonProfile.referral_code == referral_code)
+            .where(SalespersonProfile.is_active.is_(True))
+            .limit(1)
+        )
+        sp = (await db.execute(sp_stmt)).scalar_one_or_none()
+        if sp is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid referral_code",
+            )
+        salesperson_profile_id = sp.id
+
+    tenant = Tenant(
+        name=payload.name,
+        tier=payload.tier,
+        salesperson_profile_id=salesperson_profile_id,  # ✅ NEW (requires tenant model + migration)
+    )
     db.add(tenant)
     await db.flush()
 
@@ -77,7 +108,7 @@ async def create_tenant(
         is_active=True,
         accepted_terms=True,
         notifications_opt_in=payload.notifications_opt_in,
-        referral_code=payload.referral_code,
+        referral_code=referral_code,  # ✅ normalized
     )
 
     db.add(membership)

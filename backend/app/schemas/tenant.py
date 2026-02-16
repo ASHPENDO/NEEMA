@@ -1,8 +1,12 @@
 from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
+import re
 
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field, EmailStr, field_validator
+
+
+REFERRAL_REGEX = re.compile(r"^[A-Z0-9]{6}$")
 
 
 class TenantCreate(BaseModel):
@@ -13,15 +17,31 @@ class TenantCreate(BaseModel):
         ...,
         description="Must be true to create a tenant (ToS acceptance is required).",
     )
+
     notifications_opt_in: Optional[bool] = Field(
         default=None,
         description="Optional: whether the user opts in to notifications.",
     )
+
     referral_code: Optional[str] = Field(
         default=None,
-        description="Optional: referral code used during onboarding.",
-        max_length=64,
+        description="Optional: 6-character alphanumeric referral code.",
+        min_length=6,
+        max_length=6,
     )
+
+    @field_validator("referral_code")
+    @classmethod
+    def validate_referral_code(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+
+        v = v.strip().upper()
+
+        if not REFERRAL_REGEX.match(v):
+            raise ValueError("Referral code must be exactly 6 uppercase letters or digits")
+
+        return v
 
 
 class TenantOut(BaseModel):
@@ -30,12 +50,9 @@ class TenantOut(BaseModel):
     tier: str
     is_active: bool
 
-    # Pydantic v2
     model_config = {"from_attributes": True}
 
 
-# NOTE: These invitation schemas can stay here for now, but we may move them into
-# a dedicated invitations schema module when we implement tenant_invitations endpoints.
 class TenantInviteCreate(BaseModel):
     email: EmailStr
     role: str = Field(default="STAFF")
