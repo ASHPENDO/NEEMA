@@ -1,7 +1,9 @@
+# app/api/v1/tenants.py
 from __future__ import annotations
 
 import secrets
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -17,8 +19,14 @@ from app.api.deps.tenant import (
     get_current_membership,
     require_tenant_roles,
 )
+from app.core.sales_attribution import (
+    compute_commission_kes,
+    normalize_referral_code,
+    resolve_salesperson_by_referral_code,
+    utcnow,
+)
 from app.db.session import get_db
-from app.models.salesperson_profile import SalespersonProfile  # ✅ NEW
+from app.models.salesperson_earning_event import SalespersonEarningEvent
 from app.models.tenant import Tenant
 from app.models.tenant_invitation import TenantInvitation
 from app.models.tenant_membership import TenantMembership
@@ -51,13 +59,6 @@ def _role_normalize(role: str | None) -> str:
     return r
 
 
-def _normalize_referral_code(code: str | None) -> str | None:
-    if code is None:
-        return None
-    c = code.strip().upper()
-    return c or None
-
-
 # ---------------------------------------------------------
 # Tenant creation
 # ---------------------------------------------------------
@@ -73,29 +74,21 @@ async def create_tenant(
             detail="accepted_terms must be true to create a tenant",
         )
 
-    # ✅ Resolve referral code -> salesperson attribution (optional, but validated if provided)
-    referral_code = _normalize_referral_code(payload.referral_code)
-    salesperson_profile_id = None
+    # --- Sales attribution (optional) ---
+    normalized_code = normalize_referral_code(getattr(payload, "referral_code", None))
 
-    if referral_code is not None:
-        sp_stmt = (
-            select(SalespersonProfile)
-            .where(SalespersonProfile.referral_code == referral_code)
-            .where(SalespersonProfile.is_active.is_(True))
-            .limit(1)
-        )
-        sp = (await db.execute(sp_stmt)).scalar_one_or_none()
-        if sp is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid referral_code",
-            )
-        salesperson_profile_id = sp.id
+    salesperson_profile = None
+    if normalized_code:
+        salesperson_profile = await resolve_salesperson_by_referral_code(db, normalized_code)
+        if salesperson_profile is None:
+            raise HTTPException(status_code=400, detail="Invalid referral_code")
 
     tenant = Tenant(
         name=payload.name,
         tier=payload.tier,
-        salesperson_profile_id=salesperson_profile_id,  # ✅ NEW (requires tenant model + migration)
+        accepted_terms=payload.accepted_terms,
+        notifications_opt_in=payload.notifications_opt_in,
+        salesperson_profile_id=(salesperson_profile.id if salesperson_profile else None),
     )
     db.add(tenant)
     await db.flush()
@@ -108,12 +101,36 @@ async def create_tenant(
         is_active=True,
         accepted_terms=True,
         notifications_opt_in=payload.notifications_opt_in,
-        referral_code=referral_code,  # ✅ normalized
+        referral_code=normalized_code,  # normalized or None
     )
 
     db.add(membership)
     await db.commit()
     await db.refresh(tenant)
+
+    # --- Sales ledger event: TENANT_SIGNUP ---
+    if salesperson_profile:
+        gross_amount = Decimal("10000.00")
+        commission_amount = compute_commission_kes(tier=str(tenant.tier), gross_amount_kes=gross_amount)
+
+        event = SalespersonEarningEvent(
+            salesperson_profile_id=salesperson_profile.id,
+            tenant_id=tenant.id,
+            event_type="TENANT_SIGNUP",
+            currency="KES",
+            gross_amount=gross_amount,
+            commission_amount=commission_amount,
+            source="MANUAL",
+            occurred_at=utcnow(),
+            event_metadata={
+                "referral_code": normalized_code,
+                "tenant_tier": str(tenant.tier),
+                "policy": {"type": "flat_rate", "rate": "0.20"},
+            },
+        )
+        db.add(event)
+        await db.commit()
+
     return tenant
 
 
@@ -155,7 +172,6 @@ async def admin_only_check(
 # TENANT INVITATIONS (STAFF + ADMIN) — creation/list stay here
 # Accept is delegated to authoritative endpoint to avoid divergence.
 # =========================================================
-
 @router.post(
     "/invitations",
     response_model=TenantInviteOut,
@@ -177,7 +193,6 @@ async def create_tenant_invitation(
     - block duplicate pending invites per tenant+email
     - block inviting someone already a member (if user exists)
     """
-
     role = _role_normalize(payload.role)
     if role not in {"ADMIN", "STAFF"}:
         raise HTTPException(
@@ -211,7 +226,6 @@ async def create_tenant_invitation(
             )
 
     # 2) Block duplicate *pending* invitations for same tenant + email.
-    # Pending = accepted_at is NULL and expires_at is in future.
     pending_stmt = (
         select(TenantInvitation)
         .where(TenantInvitation.tenant_id == tenant.id)
