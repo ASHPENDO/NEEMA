@@ -1,3 +1,4 @@
+# alembic/env.py
 from logging.config import fileConfig
 import os
 
@@ -17,12 +18,20 @@ if config.config_file_name is not None:
 
 # add your model's MetaData object here
 # for 'autogenerate' support
-# from myapp import mymodel
-# target_metadata = mymodel.Base.metadata
 from app.db.base import Base  # noqa: E402
 import app.models  # noqa: F401, E402
 
 target_metadata = Base.metadata
+
+
+def include_object(object_, name, type_, reflected, compare_to):
+    # Prevent autogenerate from trying to drop these partial unique indexes
+    if type_ == "index" and name in {
+        "uq_platform_invitations_pending_email",
+        "uq_tenant_invites_pending_tenant_email",
+    }:
+        return False
+    return True
 
 
 def _get_db_url() -> str:
@@ -42,6 +51,7 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
+        include_object=include_object,
     )
 
     with context.begin_transaction():
@@ -66,6 +76,7 @@ def run_migrations_online() -> None:
             connection=connection,
             target_metadata=target_metadata,
             compare_type=True,
+            include_object=include_object,
         )
 
         with context.begin_transaction():
