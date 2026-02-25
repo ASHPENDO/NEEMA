@@ -14,14 +14,15 @@ from app.core.config import settings
 # -----------------------------
 # Async engine (FastAPI)
 # -----------------------------
-DATABASE_URL_ASYNC = settings.DATABASE_URL_ASYNC
+# Use CLEAN URL to avoid asyncpg errors with sslmode/channel_binding query params.
+DATABASE_URL_ASYNC = settings.DATABASE_URL_ASYNC_CLEAN
 
 engine: AsyncEngine = create_async_engine(
     DATABASE_URL_ASYNC,
     echo=False,
     future=True,
-    pool_pre_ping=True,   # IMPORTANT: detects dead connections before using them
-    pool_recycle=300,     # IMPORTANT: recycle connections periodically (seconds)
+    pool_pre_ping=True,  # detects dead connections before using them
+    pool_recycle=300,    # recycle connections periodically (seconds)
 )
 
 AsyncSessionLocal = async_sessionmaker(
@@ -42,5 +43,4 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         try:
             yield session
         finally:
-            # async with handles close, but keep this explicit for clarity
             await session.close()
