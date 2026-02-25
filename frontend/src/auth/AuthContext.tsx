@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "../lib/api";
 import { pendingEmailStorage, tokenStorage } from "../lib/storage";
+import { activeTenantStorage } from "../lib/tenantStorage";
 import type { AuthTokenResponse, MeResponse, UpdateMeRequest } from "./types";
 
 type AuthState = {
@@ -23,6 +24,25 @@ type AuthContextValue = AuthState & {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+/**
+ * Normalize /auth/me payload for backward compatibility.
+ * Backend canonical fields: full_name, phone_e164, profile_complete
+ * Older UI fields: name, phone_number, is_profile_complete
+ */
+function normalizeMe(data: any): MeResponse {
+  return {
+    ...data,
+    // Provide aliases so older UI code keeps working
+    name: data?.name ?? data?.full_name ?? null,
+    phone_number: data?.phone_number ?? data?.phone_e164 ?? null,
+    // Keep legacy boolean in sync if present in types/UI
+    is_profile_complete:
+      typeof data?.is_profile_complete === "boolean"
+        ? data.is_profile_complete
+        : Boolean(data?.profile_complete),
+  } as MeResponse;
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = useState<string | null>(() => tokenStorage.get());
   const [me, setMe] = useState<MeResponse | null>(null);
@@ -36,12 +56,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setMe(null);
       return;
     }
-    const data = await api<MeResponse>("/api/v1/auth/me", { method: "GET", auth: true });
-    setMe(data);
+    const data = await api<any>("/api/v1/auth/me", { method: "GET", auth: true });
+    setMe(normalizeMe(data));
   }
 
   function logout() {
     tokenStorage.clear();
+    activeTenantStorage.clear();
     setToken(null);
     setMe(null);
     // keep pending email optional; many apps keep it for convenience
@@ -73,12 +94,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function updateMe(payload: UpdateMeRequest) {
-    const updated = await api<MeResponse>("/api/v1/auth/me", {
+    const updated = await api<any>("/api/v1/auth/me", {
       method: "PATCH",
       auth: true,
       body: payload,
     });
-    setMe(updated);
+    setMe(normalizeMe(updated));
   }
 
   function getPendingEmail() {
@@ -91,7 +112,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     pendingEmailStorage.clear();
   }
 
-  // Bootstrap once on app start: if token exists, fetch /me; if 401, logout.
+  // Bootstrap once on app start: if token exists, fetch /me; if 401/403, logout.
   useEffect(() => {
     if (bootstrappedRef.current) return;
     bootstrappedRef.current = true;
@@ -106,8 +127,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
           logout();
         } else {
-          // Keep token, but app should still load.
-          // You can also report to Sentry here.
           console.error(e);
         }
       } finally {
@@ -144,12 +163,19 @@ export function useAuth() {
   return ctx;
 }
 
-// Helper: profile completeness (robust across schema changes)
+// Helper: profile completeness (use backend truth; robust across schema changes)
 export function isProfileComplete(me: MeResponse | null) {
   if (!me) return false;
-  if (me.is_profile_complete === true) return true;
 
-  const nameOk = !!(me.name && me.name.trim().length >= 2);
-  const phoneOk = !!(me.phone_number && me.phone_number.trim().length >= 8);
+  // Prefer canonical backend flag
+  const canonical = (me as any).profile_complete;
+  if (typeof canonical === "boolean") return canonical;
+
+  // Back-compat legacy flag
+  if ((me as any).is_profile_complete === true) return true;
+
+  // Last-resort fallback (older UI fields)
+  const nameOk = !!((me as any).name && String((me as any).name).trim().length >= 2);
+  const phoneOk = !!((me as any).phone_number && String((me as any).phone_number).trim().length >= 8);
   return nameOk && phoneOk;
 }

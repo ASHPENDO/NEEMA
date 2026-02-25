@@ -134,6 +134,32 @@ async def create_tenant(
 
 
 # ---------------------------------------------------------
+# Tenant list (for TenantGate / TenantSelection)
+# ---------------------------------------------------------
+@router.get("", response_model=List[TenantOut])
+async def list_my_tenants(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    Returns all tenants the current user is an active member of.
+    This powers:
+      - TenantGate (0 / 1 / many)
+      - TenantSelection UI
+    """
+    stmt = (
+        select(Tenant)
+        .join(TenantMembership, TenantMembership.tenant_id == Tenant.id)
+        .where(TenantMembership.user_id == user.id)
+        .where(TenantMembership.is_active.is_(True))
+        .order_by(Tenant.created_at.desc())
+    )
+    res = await db.execute(stmt)
+    tenants = res.scalars().unique().all()
+    return list(tenants)
+
+
+# ---------------------------------------------------------
 # Tenant scoped endpoints
 # ---------------------------------------------------------
 @router.get("/current", response_model=TenantOut)

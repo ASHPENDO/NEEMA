@@ -4,12 +4,7 @@ import { api, ApiError } from "../lib/api";
 import { activeTenantStorage } from "../lib/tenantStorage";
 import { useAuth, isProfileComplete } from "../auth/AuthContext";
 
-type TenantOut = {
-  id: string;
-  name: string;
-  tier: string;
-  is_active: boolean;
-};
+type TenantOut = { id: string; name: string; tier: string; is_active: boolean };
 
 export default function TenantGate() {
   const nav = useNavigate();
@@ -19,13 +14,13 @@ export default function TenantGate() {
   useEffect(() => {
     if (isBootstrapping) return;
 
-    // Not logged in → login
+    // Not logged in -> login
     if (!isAuthed) {
       nav("/login", { replace: true });
       return;
     }
 
-    // Logged in but profile incomplete → profile completion
+    // Logged in but profile incomplete -> profile completion
     if (!isProfileComplete(me)) {
       nav("/profile-completion", { replace: true });
       return;
@@ -33,27 +28,14 @@ export default function TenantGate() {
 
     (async () => {
       try {
-        const tenants = await api<TenantOut[]>("/api/v1/tenants", {
-          method: "GET",
-          auth: true,
-        });
-
+        // If already have an active tenant, proceed to dashboard
         const existing = activeTenantStorage.get();
-
-        // If an active tenant is stored, verify it still belongs to user
         if (existing) {
-          const stillValid = tenants.some((t) => t.id === existing);
-
-          if (stillValid) {
-            nav("/dashboard", { replace: true });
-            return;
-          } else {
-            // stale tenant ID → clear and restart gate
-            activeTenantStorage.clear();
-            nav("/tenant-gate", { replace: true });
-            return;
-          }
+          nav("/dashboard", { replace: true });
+          return;
         }
+
+        const tenants = await api<TenantOut[]>("/api/v1/tenants", { method: "GET", auth: true });
 
         if (tenants.length === 0) {
           nav("/tenant-create", { replace: true });

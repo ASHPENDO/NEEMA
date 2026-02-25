@@ -10,24 +10,28 @@ export default function ProfileCompletion() {
   const nav = useNavigate();
   const { me, updateMe } = useAuth();
 
-  const [name, setName] = useState(me?.name ?? "");
-  const [phone, setPhone] = useState(me?.phone_number ?? "");
-  const [password, setPassword] = useState(""); // optional
+  // Backend expects: full_name, phone_e164, country (optional)
+  // Note: me currently may not have full_name/phone_e164 yet; keep safe fallbacks.
+  const [fullName, setFullName] = useState((me as any)?.full_name ?? "");
+  const [phoneE164, setPhoneE164] = useState((me as any)?.phone_e164 ?? "");
+  const [password, setPassword] = useState(""); // optional UI-only for now (NOT sent to PATCH /auth/me)
   const [loading, setLoading] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
 
   const nameErr = useMemo(() => {
-    if (!name.trim()) return "Name is required.";
-    if (name.trim().length < 2) return "Name is too short.";
+    if (!fullName.trim()) return "Full name is required.";
+    if (fullName.trim().length < 2) return "Name is too short.";
     return undefined;
-  }, [name]);
+  }, [fullName]);
 
   const phoneErr = useMemo(() => {
-    const p = phone.trim();
+    const p = phoneE164.trim();
     if (!p) return "Phone number is required.";
-    if (p.length < 8) return "Enter a valid phone number.";
+    // Expect E.164 (e.g. +2547xxxxxxx)
+    if (!p.startsWith("+")) return "Use international format, e.g. +2547...";
+    if (p.length < 10) return "Enter a valid E.164 phone number.";
     return undefined;
-  }, [phone]);
+  }, [phoneE164]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -37,11 +41,17 @@ export default function ProfileCompletion() {
 
     setLoading(true);
     try {
+      // IMPORTANT:
+      // - Only send fields allowed by backend schema (no extras)
+      // - Do NOT send password here (backend forbids extra keys)
       await updateMe({
-        name: name.trim(),
-        phone_number: phone.trim(),
-        ...(password.trim() ? { password: password.trim() } : {}),
+        full_name: fullName.trim(),
+        phone_e164: phoneE164.trim(),
+        country: "KE", // optional; remove if you prefer not to set automatically
       });
+
+      // Clear optional password field (since it's not persisted yet)
+      setPassword("");
 
       // after update, allow dashboard
       nav("/dashboard", { replace: true });
@@ -74,17 +84,17 @@ export default function ProfileCompletion() {
           label="Full name"
           autoComplete="name"
           placeholder="Dennis Kipkemoi"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
+          value={fullName}
+          onChange={(e) => setFullName(e.target.value)}
           error={nameErr}
         />
 
         <Input
-          label="Phone number"
+          label="Phone number (E.164)"
           autoComplete="tel"
           placeholder="+2547..."
-          value={phone}
-          onChange={(e) => setPhone(e.target.value)}
+          value={phoneE164}
+          onChange={(e) => setPhoneE164(e.target.value)}
           error={phoneErr}
         />
 
