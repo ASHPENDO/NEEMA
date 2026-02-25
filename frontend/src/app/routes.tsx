@@ -6,6 +6,9 @@ import ProfileCompletion from "../pages/ProfileCompletion";
 import Dashboard from "../pages/Dashboard";
 import { GuestOnly, RequireAuth, RequireProfileComplete } from "../auth/authGuards";
 
+// Define the application router with nested route guards
+// Public pages (guest only)
+// Protected pages requiring authentication and profile completion
 export const router = createBrowserRouter([
   {
     element: <GuestOnly />,
@@ -21,7 +24,9 @@ export const router = createBrowserRouter([
       { path: "/complete-profile", element: <ProfileCompletion /> },
       {
         element: <RequireProfileComplete />,
-        children: [{ path: "/dashboard", element: <Dashboard /> }],
+        children: [
+          { path: "/dashboard", element: <Dashboard /> },
+        ],
       },
     ],
   },
