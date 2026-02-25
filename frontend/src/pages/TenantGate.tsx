@@ -35,7 +35,10 @@ export default function TenantGate() {
           return;
         }
 
-        const tenants = await api<TenantOut[]>("/api/v1/tenants", { method: "GET", auth: true });
+        const tenants = await api<TenantOut[]>("/api/v1/tenants", {
+          method: "GET",
+          auth: true,
+        });
 
         if (tenants.length === 0) {
           nav("/tenant-create", { replace: true });

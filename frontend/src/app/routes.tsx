@@ -1,87 +1,35 @@
-import React, { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { api, ApiError } from "../lib/api";
-import { activeTenantStorage } from "../lib/tenantStorage";
-import { useAuth, isProfileComplete } from "../auth/AuthContext";
+// src/app/routes.tsx
+import React from "react";
+import { createBrowserRouter, Navigate } from "react-router-dom";
 
-type TenantOut = {
-  id: string;
-  name: string;
-  tier: string;
-  is_active: boolean;
-};
+import Login from "../pages/Login";
+import TenantGate from "../pages/TenantGate";
+import TenantSelection from "../pages/TenantSelection";
+import TenantMembers from "../pages/TenantMembers";
 
-export default function TenantGate() {
-  const nav = useNavigate();
-  const { isBootstrapping, isAuthed, me } = useAuth();
-  const [error, setError] = useState<string | null>(null);
+// Temporary placeholder dashboard (replace later)
+const Dashboard = () => (
+  <div style={{ padding: 16 }}>Dashboard</div>
+);
 
-  useEffect(() => {
-    if (isBootstrapping) return;
+// Temporary placeholder tenant create (replace later)
+const TenantCreate = () => (
+  <div style={{ padding: 16 }}>Tenant Create</div>
+);
 
-    // Not logged in → login
-    if (!isAuthed) {
-      nav("/login", { replace: true });
-      return;
-    }
+// Temporary placeholder profile completion
+const ProfileCompletion = () => (
+  <div style={{ padding: 16 }}>Profile Completion</div>
+);
 
-    // Logged in but profile incomplete → profile completion
-    if (!isProfileComplete(me)) {
-      nav("/profile-completion", { replace: true });
-      return;
-    }
+export const router = createBrowserRouter([
+  { path: "/", element: <Navigate to="/tenant-gate" replace /> },
 
-    (async () => {
-      try {
-        const tenants = await api<TenantOut[]>("/api/v1/tenants", {
-          method: "GET",
-          auth: true,
-        });
-
-        const existing = activeTenantStorage.get();
-
-        // If an active tenant is stored, verify it still belongs to user
-        if (existing) {
-          const stillValid = tenants.some((t) => t.id === existing);
-
-          if (stillValid) {
-            nav("/dashboard", { replace: true });
-            return;
-          } else {
-            // stale tenant ID → clear and restart gate
-            activeTenantStorage.clear();
-            nav("/tenant-gate", { replace: true });
-            return;
-          }
-        }
-
-        if (tenants.length === 0) {
-          nav("/tenant-create", { replace: true });
-          return;
-        }
-
-        if (tenants.length === 1) {
-          activeTenantStorage.set(tenants[0].id);
-          nav("/dashboard", { replace: true });
-          return;
-        }
-
-        nav("/tenant-selection", { replace: true });
-      } catch (e) {
-        if (e instanceof ApiError) setError(e.message);
-        else setError("Could not load tenants. Try again.");
-      }
-    })();
-  }, [isBootstrapping, isAuthed, me, nav]);
-
-  if (error) {
-    return (
-      <div className="p-6 text-sm">
-        <div className="mb-2 font-semibold">Tenant gate error</div>
-        <div className="text-red-700">{error}</div>
-      </div>
-    );
-  }
-
-  return <div className="p-6 text-sm">Loading workspace…</div>;
-}
+  { path: "/login", element: <Login /> },
+  { path: "/tenant-gate", element: <TenantGate /> },
+  { path: "/tenant-selection", element: <TenantSelection /> },
+  { path: "/tenant-members", element: <TenantMembers /> },
+  { path: "/tenant-create", element: <TenantCreate /> },
+  { path: "/profile-completion", element: <ProfileCompletion /> },
+  { path: "/dashboard", element: <Dashboard /> },
+]);
