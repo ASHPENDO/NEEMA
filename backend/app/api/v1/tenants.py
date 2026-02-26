@@ -1,6 +1,7 @@
 # app/api/v1/tenants.py
 from __future__ import annotations
 
+import uuid
 import secrets
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -411,3 +412,71 @@ async def accept_tenant_invitation(
         "user_id": str(current_user.id),
         "role": membership.role,
     }
+
+
+@router.post("/invitations/{invite_id}/revoke", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_tenant_invitation(
+    invite_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    tenant: Tenant = Depends(get_current_tenant),
+    _membership: TenantMembership = Depends(require_tenant_roles("OWNER", "ADMIN")),
+    _actor: User = Depends(get_current_user),
+):
+    inv = (
+        await db.execute(
+            select(TenantInvitation)
+            .where(
+                TenantInvitation.id == invite_id,
+                TenantInvitation.tenant_id == tenant.id,
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+
+    if inv is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitation not found")
+
+    if inv.accepted_at is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Invitation already accepted")
+
+    if inv.expires_at < _utcnow():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Invitation already expired")
+
+    # Soft-revoke by expiring it now (keeps audit trail)
+    inv.expires_at = _utcnow()
+    await db.commit()
+    return None
+
+
+@router.post("/invitations/{invite_id}/resend", status_code=status.HTTP_204_NO_CONTENT)
+async def resend_tenant_invitation(
+    invite_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    tenant: Tenant = Depends(get_current_tenant),
+    _membership: TenantMembership = Depends(require_tenant_roles("OWNER", "ADMIN")),
+):
+    inv = (
+        await db.execute(
+            select(TenantInvitation)
+            .where(
+                TenantInvitation.id == invite_id,
+                TenantInvitation.tenant_id == tenant.id,
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+
+    if inv is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitation not found")
+
+    if inv.accepted_at is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Invitation already accepted")
+
+    if inv.expires_at < _utcnow():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Invitation expired")
+
+    # TODO: wire email sender; for now optionally log token/link
+    # print(f"[TENANT_INVITE_RESEND] tenant={tenant.id} email={inv.email} token={inv.token}")
+
+    await db.commit()
+    return None
