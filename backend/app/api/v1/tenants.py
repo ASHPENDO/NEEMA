@@ -11,9 +11,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.auth import get_current_user
-from app.api.v1.tenant_invitations import (
-    accept_tenant_invitation as accept_tenant_invitation_authoritative,
-)
 from app.api.deps.tenant import (
     get_current_tenant,
     get_current_membership,
@@ -25,6 +22,8 @@ from app.core.sales_attribution import (
     resolve_salesperson_by_referral_code,
     utcnow,
 )
+from app.core.tier_limits import get_staff_limit_for_tier
+from app.core.tier_resolver import resolve_effective_tier
 from app.db.session import get_db
 from app.models.salesperson_earning_event import SalespersonEarningEvent
 from app.models.tenant import Tenant
@@ -274,5 +273,141 @@ async def list_tenant_invitations(
 async def accept_tenant_invitation(
     payload: AcceptTenantInvite,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    return await accept_tenant_invitation_authoritative(payload=payload, db=db)
+    """
+    Accept invitation by token (AUTHENTICATED; magic-code).
+    - Requires JWT.
+    - Enforces that current_user.email matches invitation.email.
+    - Does NOT create users (auth flow already did that).
+    - Creates/reactivates membership and marks invite accepted.
+    """
+    if payload.accept_tos is not True:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="accept_tos must be true")
+
+    token = (payload.token or "").strip()
+    if not token:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="token is required")
+
+    # Lock invitation row to prevent concurrent accepts
+    inv = (
+        await db.execute(
+            select(TenantInvitation)
+            .where(TenantInvitation.token == token)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+
+    if inv is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid invitation token")
+
+    if inv.accepted_at is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Invitation already accepted")
+
+    if inv.expires_at < _utcnow():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invitation expired")
+
+    invite_email = normalize_email(inv.email)
+    user_email = normalize_email(current_user.email or "")
+    if user_email != invite_email:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "INVITE_EMAIL_MISMATCH",
+                "message": "You are signed in with a different email than the invitation.",
+                "invited_email": invite_email,
+                "current_email": user_email,
+            },
+        )
+
+    invite_role = _role_normalize(inv.role)
+
+    # Tier staff-slot enforcement (ONLY for STAFF)
+    if invite_role == "STAFF":
+        tenant = (
+            await db.execute(
+                select(Tenant)
+                .where(Tenant.id == inv.tenant_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if tenant is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
+
+        tier_str = resolve_effective_tier(tenant)
+        max_staff = get_staff_limit_for_tier(tier_str)
+
+        existing_active_staff = (
+            await db.execute(
+                select(TenantMembership).where(
+                    TenantMembership.tenant_id == inv.tenant_id,
+                    TenantMembership.user_id == current_user.id,
+                    TenantMembership.is_active.is_(True),
+                    TenantMembership.role == "STAFF",
+                )
+            )
+        ).scalar_one_or_none()
+
+        count_stmt = select(TenantMembership).where(
+            TenantMembership.tenant_id == inv.tenant_id,
+            TenantMembership.is_active.is_(True),
+            TenantMembership.role == "STAFF",
+        )
+        if existing_active_staff is not None:
+            count_stmt = count_stmt.where(TenantMembership.user_id != current_user.id)
+
+        active_staff_count = len((await db.execute(count_stmt)).scalars().all())
+        if active_staff_count >= max_staff:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": "STAFF_LIMIT_EXCEEDED",
+                    "message": "Staff limit exceeded for this tenant tier. Upgrade your plan to add more staff.",
+                    "tier": tier_str,
+                    "limit": max_staff,
+                    "active_staff": active_staff_count,
+                },
+            )
+
+    # Create or reactivate membership
+    membership = (
+        await db.execute(
+            select(TenantMembership)
+            .where(
+                TenantMembership.tenant_id == inv.tenant_id,
+                TenantMembership.user_id == current_user.id,
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+
+    if membership is None:
+        membership = TenantMembership(
+            tenant_id=inv.tenant_id,
+            user_id=current_user.id,
+            role=invite_role,
+            permissions=inv.permissions or [],
+            accepted_terms=True,
+            notifications_opt_in=payload.accept_notifications,
+            is_active=True,
+            referral_code=None,
+        )
+        db.add(membership)
+    else:
+        membership.is_active = True
+        membership.role = invite_role
+        membership.permissions = inv.permissions or []
+        membership.accepted_terms = True
+        membership.notifications_opt_in = payload.accept_notifications
+
+    inv.accepted_at = _utcnow()
+    inv.accepted_by_user_id = current_user.id
+
+    await db.commit()
+
+    return {
+        "status": "ok",
+        "tenant_id": str(inv.tenant_id),
+        "user_id": str(current_user.id),
+        "role": membership.role,
+    }
