@@ -16,7 +16,8 @@ export function RequireProfileComplete() {
   const location = useLocation();
 
   if (isBootstrapping) return null;
-  if (!isProfileComplete(me)) return <Navigate to="/complete-profile" replace state={{ from: location.pathname }} />;
+  if (!isProfileComplete(me))
+    return <Navigate to="/profile-completion" replace state={{ from: location.pathname }} />;
   return <Outlet />;
 }
 

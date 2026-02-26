@@ -20,7 +20,8 @@ export default function Verify() {
   const [info, setInfo] = useState<string | null>(null);
 
   const otp = useMemo(() => normalizeOtp(code), [code]);
-  const otpError = code.length === 0 ? undefined : otp.length < 4 ? "Enter the code from your email." : undefined;
+  const otpError =
+    code.length === 0 ? undefined : otp.length < 4 ? "Enter the code from your email." : undefined;
 
   async function onVerify(e: React.FormEvent) {
     e.preventDefault();
@@ -45,7 +46,7 @@ export default function Verify() {
 
       // After verifyCode we fetch /me; now route based on profile completion
       const complete = isProfileComplete(me);
-      nav(complete ? "/dashboard" : "/complete-profile", { replace: true });
+      nav(complete ? "/dashboard" : "/profile-completion", { replace: true });
     } catch (err) {
       if (err instanceof ApiError) setServerError(err.message);
       else setServerError("Verification failed. Please try again.");
