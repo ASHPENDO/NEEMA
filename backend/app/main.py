@@ -15,14 +15,20 @@ from app.api.v1.platform_sales import router as platform_sales_router
 def create_application() -> FastAPI:
     app = FastAPI(title="POSTIKA API")
 
-    # ✅ CORS Configuration
+    # ✅ CORS Configuration (Dev + Production + Codespaces)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
+            # 🔹 Local development (Vite frontend)
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+
+            # 🔹 Production domains
             "https://postika.co.ke",
             "https://www.postika.co.ke",
             "https://api.postika.co.ke",
         ],
+        # 🔹 GitHub Codespaces / *.app.github.dev domains
         allow_origin_regex=r"^https:\/\/.*\.app\.github\.dev$",
         allow_credentials=True,
         allow_methods=["*"],
