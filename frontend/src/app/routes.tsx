@@ -13,6 +13,8 @@ import TenantInvitations from "../pages/TenantInvitations";
 import ProfileCompletion from "../pages/ProfileCompletion";
 import Dashboard from "../pages/Dashboard";
 
+import TenantRoleGuard from "../components/TenantRoleGuard";
+
 export const router = createBrowserRouter([
   { path: "/", element: <Navigate to="/tenant-gate" replace /> },
 
@@ -23,14 +25,30 @@ export const router = createBrowserRouter([
   { path: "/tenant-gate", element: <TenantGate /> },
   { path: "/tenant-selection", element: <TenantSelection /> },
 
-  // ✅ Real members route
-  { path: "/tenant-members", element: <TenantMembers /> },
+  // ✅ Members: OWNER/ADMIN only
+  {
+    path: "/tenant-members",
+    element: (
+      <TenantRoleGuard allow={["OWNER", "ADMIN"]}>
+        <TenantMembers />
+      </TenantRoleGuard>
+    ),
+  },
 
-  // ✅ Redirect so manual URL /tenants/membership works
+  // ✅ Redirect so manual URL /tenants/membership doesn't 404
   { path: "/tenants/membership", element: <Navigate to="/tenant-members" replace /> },
 
   { path: "/tenant-create", element: <TenantCreate /> },
-  { path: "/tenant-invitations", element: <TenantInvitations /> },
+
+  // ✅ Invitations: OWNER/ADMIN only
+  {
+    path: "/tenant-invitations",
+    element: (
+      <TenantRoleGuard allow={["OWNER", "ADMIN"]}>
+        <TenantInvitations />
+      </TenantRoleGuard>
+    ),
+  },
 
   { path: "/profile-completion", element: <ProfileCompletion /> },
   { path: "/dashboard", element: <Dashboard /> },

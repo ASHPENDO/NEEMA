@@ -1,3 +1,4 @@
+// frontend/src/pages/TenantInvitations.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ApiError } from "../lib/api";
@@ -14,7 +15,6 @@ import { PageShell } from "../components/PageShell";
 import { Input } from "../components/Input";
 import { Button } from "../components/Button";
 import { normalizeEmail, isValidEmail } from "../lib/validators";
-import { useAuth } from "../auth/AuthContext";
 
 const ROLE_OPTIONS: TenantRole[] = ["OWNER", "ADMIN", "MANAGER", "STAFF"];
 
@@ -27,48 +27,21 @@ function formatDate(iso?: string | null) {
 
 function computeStatus(inv: TenantInvitation): string {
   const anyInv = inv as any;
-  if (typeof anyInv.status === "string" && anyInv.status.trim().length > 0) {
-    return anyInv.status;
-  }
+  if (typeof anyInv.status === "string" && anyInv.status.trim().length > 0) return anyInv.status;
 
   if (inv.accepted_at) return "accepted";
 
   if (inv.expires_at) {
     const exp = new Date(inv.expires_at);
-    if (!Number.isNaN(exp.getTime()) && exp.getTime() < Date.now()) {
-      return "expired";
-    }
+    if (!Number.isNaN(exp.getTime()) && exp.getTime() < Date.now()) return "expired";
   }
 
   return "pending";
 }
 
-function canManageInvitations(role?: TenantRole | null) {
-  return role === "OWNER" || role === "ADMIN";
-}
-
-// Best-effort: derives current user's role for active tenant from me.memberships.
-// If your MeResponse differs, this safely falls back to undefined (no management).
-function getMyRoleForActiveTenant(me: any, activeTenantId: string | null): TenantRole | undefined {
-  if (!me || !activeTenantId) return undefined;
-
-  const memberships = me.memberships ?? me.tenant_memberships ?? me.tenants ?? [];
-  if (!Array.isArray(memberships)) return undefined;
-
-  const match =
-    memberships.find((m: any) => m?.tenant_id === activeTenantId) ??
-    memberships.find((m: any) => m?.tenant?.id === activeTenantId) ??
-    memberships.find((m: any) => m?.tenantId === activeTenantId);
-
-  const role = match?.role ?? match?.tenant_role ?? match?.tenantRole;
-  if (role === "OWNER" || role === "ADMIN" || role === "MANAGER" || role === "STAFF") return role;
-
-  return undefined;
-}
-
 export default function TenantInvitations() {
   const nav = useNavigate();
-  const { me } = useAuth();
+  const tenantId = useMemo(() => activeTenantStorage.get(), []);
 
   const [items, setItems] = useState<TenantInvitation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -79,23 +52,15 @@ export default function TenantInvitations() {
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Per-row action loading states
   const [resendingId, setResendingId] = useState<string | null>(null);
   const [revokingId, setRevokingId] = useState<string | null>(null);
 
-  const tenantId = useMemo(() => activeTenantStorage.get(), []);
-  const myRole = useMemo(() => getMyRoleForActiveTenant(me as any, tenantId), [me, tenantId]);
-  const canManage = canManageInvitations(myRole);
-
   const emailNorm = useMemo(() => normalizeEmail(email), [email]);
   const emailError =
-    email.length === 0
-      ? undefined
-      : isValidEmail(emailNorm)
-      ? undefined
-      : "Enter a valid email address.";
+    email.length === 0 ? undefined : isValidEmail(emailNorm) ? undefined : "Enter a valid email address.";
 
   useEffect(() => {
+    // Keep tenant context guard (not RBAC)
     if (!tenantId) {
       nav("/tenant-selection", { replace: true });
       return;
@@ -107,6 +72,7 @@ export default function TenantInvitations() {
   async function refresh() {
     setLoading(true);
     setError(null);
+
     try {
       const data = await listTenantInvitations();
       const list = Array.isArray(data) ? data : (data as any)?.items;
@@ -122,11 +88,6 @@ export default function TenantInvitations() {
   async function onCreate(e: React.FormEvent) {
     e.preventDefault();
     setFormError(null);
-
-    if (!canManage) {
-      setFormError("Only Owners/Admins can invite members.");
-      return;
-    }
 
     if (!isValidEmail(emailNorm)) {
       setFormError("Please enter a valid email.");
@@ -155,21 +116,15 @@ export default function TenantInvitations() {
   }
 
   async function onResend(inviteId: string) {
-    if (!canManage) {
-      alert("Only Owners/Admins can manage invitations.");
-      return;
-    }
-
     setResendingId(inviteId);
     try {
       await resendTenantInvitation(inviteId);
-      // Optional: refresh so server-side sent_at/updated_at changes show up if present
       await refresh();
     } catch (e) {
       const err = e as ApiError;
 
       if (err.status === 409) {
-        alert(err?.message ?? "This invitation can’t be resent (it may be accepted, revoked, or expired).");
+        alert(err?.message ?? "This invitation can’t be resent (accepted/revoked/expired).");
       } else if (err.status === 403) {
         alert("You don’t have permission to resend invitations.");
       } else if (err.status === 404) {
@@ -183,11 +138,6 @@ export default function TenantInvitations() {
   }
 
   async function onRevoke(inviteId: string) {
-    if (!canManage) {
-      alert("Only Owners/Admins can manage invitations.");
-      return;
-    }
-
     const ok = window.confirm("Revoke this invitation?");
     if (!ok) return;
 
@@ -199,7 +149,7 @@ export default function TenantInvitations() {
       const err = e as ApiError;
 
       if (err.status === 409) {
-        alert(err?.message ?? "This invitation can’t be revoked (it may already be accepted/revoked).");
+        alert(err?.message ?? "This invitation can’t be revoked (accepted/revoked/expired).");
       } else if (err.status === 403) {
         alert("You don’t have permission to revoke invitations.");
       } else if (err.status === 404) {
@@ -215,64 +165,42 @@ export default function TenantInvitations() {
   return (
     <PageShell title="Tenant Invitations" subtitle="Invite your team members into this tenant.">
       <div className="space-y-6">
-        {/* Create invitation (RBAC gated) */}
-        {canManage ? (
-          <form
-            onSubmit={onCreate}
-            className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3"
-          >
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-              <div className="md:col-span-2">
-                <label className="block text-sm text-white/80 mb-1">Invitee email</label>
-                <Input
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="team@company.com"
-                />
-                {emailError && <p className="text-sm text-red-300 mt-1">{emailError}</p>}
-              </div>
-
-              <div>
-                <label className="block text-sm text-white/80 mb-1">Role</label>
-                <select
-                  value={role}
-                  onChange={(e) => setRole(e.target.value as TenantRole)}
-                  className="w-full rounded-xl bg-black/20 border border-white/10 px-3 py-2 text-white"
-                >
-                  {ROLE_OPTIONS.map((r) => (
-                    <option key={r} value={r} className="bg-black">
-                      {r}
-                    </option>
-                  ))}
-                </select>
-              </div>
+        {/* Create invitation */}
+        <form onSubmit={onCreate} className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+            <div className="md:col-span-2">
+              <label className="block text-sm text-white/80 mb-1">Invitee email</label>
+              <Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="team@company.com" />
+              {emailError && <p className="text-sm text-red-300 mt-1">{emailError}</p>}
             </div>
 
-            {formError && <p className="text-sm text-red-300">{formError}</p>}
-
-            <div className="flex gap-2">
-              <Button type="submit" disabled={submitting || !!emailError || email.length === 0}>
-                {submitting ? "Inviting..." : "Send invitation"}
-              </Button>
-              <Button type="button" variant="secondary" onClick={() => nav("/dashboard")}>
-                Back to dashboard
-              </Button>
-            </div>
-          </form>
-        ) : (
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-            <p className="text-white/80">
-              You’re signed in as <span className="font-semibold">{myRole ?? "—"}</span>. Only{" "}
-              <span className="font-semibold">Owners</span> and <span className="font-semibold">Admins</span>{" "}
-              can invite or manage invitations.
-            </p>
-            <div className="mt-3">
-              <Button type="button" variant="secondary" onClick={() => nav("/dashboard")}>
-                Back to dashboard
-              </Button>
+            <div>
+              <label className="block text-sm text-white/80 mb-1">Role</label>
+              <select
+                value={role}
+                onChange={(e) => setRole(e.target.value as TenantRole)}
+                className="w-full rounded-xl bg-black/20 border border-white/10 px-3 py-2 text-white"
+              >
+                {ROLE_OPTIONS.map((r) => (
+                  <option key={r} value={r} className="bg-black">
+                    {r}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
-        )}
+
+          {formError && <p className="text-sm text-red-300">{formError}</p>}
+
+          <div className="flex gap-2">
+            <Button type="submit" disabled={submitting || !!emailError || email.length === 0}>
+              {submitting ? "Inviting..." : "Send invitation"}
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => nav("/dashboard")}>
+              Back to dashboard
+            </Button>
+          </div>
+        </form>
 
         {/* List invitations */}
         <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
@@ -306,8 +234,6 @@ export default function TenantInvitations() {
                   {items.map((inv) => {
                     const status = computeStatus(inv);
                     const rowBusy = resendingId === inv.id || revokingId === inv.id;
-
-                    // Optional: only allow resend/revoke when pending (UI hardening)
                     const canActOnThis = status === "pending";
 
                     return (
@@ -318,39 +244,30 @@ export default function TenantInvitations() {
                         <td className="py-2 pr-3">{formatDate(inv.expires_at)}</td>
                         <td className="py-2 pr-3">{formatDate(inv.created_at)}</td>
                         <td className="py-2 text-right">
-                          {canManage ? (
-                            <div className="inline-flex gap-2">
-                              <Button
-                                type="button"
-                                variant="secondary"
-                                disabled={rowBusy || !canActOnThis}
-                                onClick={() => onResend(inv.id)}
-                              >
-                                {resendingId === inv.id ? "Resending..." : "Resend"}
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="danger"
-                                disabled={rowBusy || !canActOnThis}
-                                onClick={() => onRevoke(inv.id)}
-                              >
-                                {revokingId === inv.id ? "Revoking..." : "Revoke"}
-                              </Button>
-                            </div>
-                          ) : (
-                            <span className="text-white/40">—</span>
-                          )}
+                          <div className="inline-flex gap-2">
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              disabled={rowBusy || !canActOnThis}
+                              onClick={() => onResend(inv.id)}
+                            >
+                              {resendingId === inv.id ? "Resending..." : "Resend"}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="danger"
+                              disabled={rowBusy || !canActOnThis}
+                              onClick={() => onRevoke(inv.id)}
+                            >
+                              {revokingId === inv.id ? "Revoking..." : "Revoke"}
+                            </Button>
+                          </div>
                         </td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
-              {!canManage && (
-                <p className="mt-3 text-xs text-white/50">
-                  Only Owners/Admins can manage invitations.
-                </p>
-              )}
             </div>
           )}
         </div>

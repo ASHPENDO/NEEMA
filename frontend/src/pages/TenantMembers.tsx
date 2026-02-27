@@ -6,28 +6,12 @@ import { activeTenantStorage } from "../lib/tenantStorage";
 import { PageShell } from "../components/PageShell";
 import { Button } from "../components/Button";
 
-type MyMembership = {
-  tenant_id: string;
-  user_id: string;
-  role: TenantRole;
-  permissions: string[];
-  is_active: boolean;
-  accepted_terms: boolean;
-  notifications_opt_in: boolean;
-  referral_code: string | null;
-  created_at: string;
-};
-
 type UpdateTenantMemberRequest = {
   role?: TenantRole;
   is_active?: boolean;
 };
 
 const ROLE_OPTIONS: TenantRole[] = ["OWNER", "ADMIN", "MANAGER", "STAFF"];
-
-function canManageMembers(role?: TenantRole | null) {
-  return role === "OWNER" || role === "ADMIN";
-}
 
 function formatDate(iso?: string | null) {
   if (!iso) return "—";
@@ -39,10 +23,6 @@ function formatDate(iso?: string | null) {
 export default function TenantMembers() {
   const nav = useNavigate();
   const tenantId = useMemo(() => activeTenantStorage.get(), []);
-
-  const [myMembership, setMyMembership] = useState<MyMembership | null>(null);
-  const myRole = myMembership?.role ?? null;
-  const canManage = canManageMembers(myRole);
 
   const [items, setItems] = useState<TenantMember[]>([]);
   const [loading, setLoading] = useState(true);
@@ -63,18 +43,8 @@ export default function TenantMembers() {
       setError(null);
 
       try {
-        // 1) Always fetch my membership (authoritative role for active tenant)
-        const mem = await api<MyMembership>("/api/v1/tenants/membership", { method: "GET" });
-        if (!cancelled) setMyMembership(mem);
-
-        // 2) Only OWNER/ADMIN can list members
-        const role = (mem?.role ?? "STAFF") as TenantRole;
-        if (canManageMembers(role)) {
-          const res = await api<TenantMember[]>("/api/v1/tenants/members", { method: "GET" });
-          if (!cancelled) setItems(Array.isArray(res) ? res : []);
-        } else {
-          if (!cancelled) setItems([]);
-        }
+        const res = await api<TenantMember[]>("/api/v1/tenants/members", { method: "GET" });
+        if (!cancelled) setItems(Array.isArray(res) ? res : []);
       } catch (e) {
         if (cancelled) return;
 
@@ -100,16 +70,8 @@ export default function TenantMembers() {
     setError(null);
 
     try {
-      const mem = await api<MyMembership>("/api/v1/tenants/membership", { method: "GET" });
-      setMyMembership(mem);
-
-      const role = (mem?.role ?? "STAFF") as TenantRole;
-      if (canManageMembers(role)) {
-        const res = await api<TenantMember[]>("/api/v1/tenants/members", { method: "GET" });
-        setItems(Array.isArray(res) ? res : []);
-      } else {
-        setItems([]);
-      }
+      const res = await api<TenantMember[]>("/api/v1/tenants/members", { method: "GET" });
+      setItems(Array.isArray(res) ? res : []);
     } catch (e) {
       const err = e as ApiError;
       setError(err?.message ?? "Failed to load members.");
@@ -126,8 +88,6 @@ export default function TenantMembers() {
   }
 
   async function onChangeRole(member: TenantMember, nextRole: TenantRole) {
-    if (!canManage) return;
-
     setRowBusyId(member.user_id);
     try {
       const updated = await patchMember(member.user_id, { role: nextRole });
@@ -138,7 +98,7 @@ export default function TenantMembers() {
       if (err.status === 409) {
         alert(err.message ?? "Role change not allowed.");
       } else if (err.status === 403) {
-        alert("You don’t have permission to change roles.");
+        alert("Forbidden: you don’t have permission to change roles.");
       } else if (err.status === 401) {
         alert("Not authenticated. Please sign in again.");
       } else {
@@ -150,14 +110,7 @@ export default function TenantMembers() {
   }
 
   async function onToggleActive(member: TenantMember, nextActive: boolean) {
-    if (!canManage) return;
-
-    // client-side self guard (server also blocks)
-    if (myMembership?.user_id && member.user_id === myMembership.user_id && nextActive === false) {
-      alert("You cannot deactivate yourself.");
-      return;
-    }
-
+    // NOTE: Backend blocks self-deactivate and last-owner rules; UI doesn't infer "me" here.
     const ok = window.confirm(nextActive ? "Reactivate this member?" : "Deactivate this member?");
     if (!ok) return;
 
@@ -171,7 +124,7 @@ export default function TenantMembers() {
       if (err.status === 409) {
         alert(err.message ?? "This change is not allowed.");
       } else if (err.status === 403) {
-        alert("You don’t have permission to manage members.");
+        alert("Forbidden: you don’t have permission to manage members.");
       } else if (err.status === 401) {
         alert("Not authenticated. Please sign in again.");
       } else {
@@ -186,9 +139,7 @@ export default function TenantMembers() {
     <PageShell title="Tenant Members" subtitle="Manage who can access this tenant.">
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <div className="text-white/80 text-sm">
-            Your role: <span className="font-semibold text-white">{myRole ?? "—"}</span>
-          </div>
+          <div className="text-white/80 text-sm">Members list (tenant-scoped).</div>
           <div className="flex gap-2">
             <Button variant="secondary" onClick={refresh} disabled={loading}>
               Refresh
@@ -199,16 +150,9 @@ export default function TenantMembers() {
           </div>
         </div>
 
-        {!canManage && (
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-white/80">
-            Only <span className="font-semibold">Owners</span> and <span className="font-semibold">Admins</span> can
-            manage members. You can still see your role above.
-          </div>
-        )}
-
         <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
           {loading ? (
-            <p className="text-white/70">Loading…</p>
+            <p className="text-white/70">Loading members…</p>
           ) : error ? (
             <div>
               <p className="text-red-300 font-medium">Members error</p>
@@ -217,8 +161,6 @@ export default function TenantMembers() {
                 Tip: If you see 401, your token likely expired — request/verify code again and refresh.
               </p>
             </div>
-          ) : !canManage ? (
-            <div className="text-white/70 text-sm">You don’t have access to the full members list.</div>
           ) : items.length === 0 ? (
             <p className="text-white/70">No members found.</p>
           ) : (
@@ -275,8 +217,8 @@ export default function TenantMembers() {
               </table>
 
               <p className="mt-3 text-xs text-white/50">
-                Safety rules: you can’t deactivate yourself; you can’t demote or deactivate the last OWNER. Backend
-                enforces these rules even if the UI is bypassed.
+                Safety rules are enforced by the backend (e.g. you can’t deactivate yourself; you can’t demote/deactivate
+                the last OWNER).
               </p>
             </div>
           )}
