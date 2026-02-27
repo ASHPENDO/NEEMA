@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.auth import get_current_user
@@ -37,6 +37,7 @@ from app.schemas.tenant_invitation import (
     TenantInviteCreate,
     TenantInviteOut,
 )
+from app.schemas.tenant_membership import TenantMemberOut, TenantMemberUpdate
 
 router = APIRouter(prefix="/tenants", tags=["tenants"])
 
@@ -191,6 +192,165 @@ async def admin_only_check(
     _membership: TenantMembership = Depends(require_tenant_roles("OWNER", "ADMIN")),
 ):
     return {"ok": True}
+
+
+# =========================================================
+# TENANT MEMBERS
+# =========================================================
+@router.get("/members", response_model=List[TenantMemberOut])
+async def list_tenant_members(
+    db: AsyncSession = Depends(get_db),
+    tenant: Tenant = Depends(get_current_tenant),
+    _membership: TenantMembership = Depends(require_tenant_roles("OWNER", "ADMIN")),
+):
+    stmt = (
+        select(TenantMembership, User)
+        .join(User, User.id == TenantMembership.user_id)
+        .where(TenantMembership.tenant_id == tenant.id)
+        .order_by(TenantMembership.created_at.asc())
+    )
+    res = await db.execute(stmt)
+    rows = res.all()
+
+    out: list[TenantMemberOut] = []
+    for mem, user in rows:
+        out.append(
+            TenantMemberOut(
+                tenant_id=str(mem.tenant_id),
+                user_id=str(mem.user_id),
+                email=user.email,
+                name=getattr(user, "name", None),
+                role=_role_normalize(mem.role),
+                permissions=mem.permissions or [],
+                is_active=bool(mem.is_active),
+                created_at=mem.created_at,
+            )
+        )
+    return out
+
+
+@router.patch("/members/{member_user_id}", response_model=TenantMemberOut)
+async def update_tenant_member(
+    member_user_id: uuid.UUID,
+    payload: TenantMemberUpdate,
+    db: AsyncSession = Depends(get_db),
+    tenant: Tenant = Depends(get_current_tenant),
+    actor: User = Depends(get_current_user),
+    actor_membership: TenantMembership = Depends(get_current_membership),
+):
+    """
+    Update a member inside the current tenant.
+    - OWNER/ADMIN can manage.
+    - Cannot deactivate self.
+    - Cannot demote/deactivate the last OWNER.
+    - Only OWNER can change another OWNER’s role (strict hardening).
+    """
+    actor_role = _role_normalize(actor_membership.role)
+    if actor_role not in {"OWNER", "ADMIN"}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    # Lock target membership row
+    target = (
+        await db.execute(
+            select(TenantMembership)
+            .where(
+                TenantMembership.tenant_id == tenant.id,
+                TenantMembership.user_id == member_user_id,
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+
+    if target is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
+
+    # Self-protection
+    if member_user_id == actor.id and payload.is_active is False:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="You cannot deactivate yourself")
+
+    allowed_roles = {"OWNER", "ADMIN", "MANAGER", "STAFF"}
+
+    # Role change handling
+    if payload.role is not None:
+        new_role = _role_normalize(payload.role)
+        if new_role not in allowed_roles:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid role")
+
+        current_role = _role_normalize(target.role)
+
+        # Only OWNER can change an OWNER
+        if current_role == "OWNER" and actor_role != "OWNER":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only an OWNER can change another OWNER",
+            )
+
+        # If demoting an OWNER, ensure not last OWNER
+        if current_role == "OWNER" and new_role != "OWNER":
+            owners_count = (
+                await db.execute(
+                    select(func.count())
+                    .select_from(TenantMembership)
+                    .where(TenantMembership.tenant_id == tenant.id)
+                    .where(TenantMembership.is_active.is_(True))
+                    .where(TenantMembership.role == "OWNER")
+                )
+            ).scalar_one()
+            if int(owners_count) <= 1:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Cannot demote the last OWNER",
+                )
+
+        target.role = new_role
+
+    # Active/deactivate handling
+    if payload.is_active is not None:
+        # If deactivating an OWNER, ensure not last OWNER
+        if payload.is_active is False and _role_normalize(target.role) == "OWNER":
+            owners_count = (
+                await db.execute(
+                    select(func.count())
+                    .select_from(TenantMembership)
+                    .where(TenantMembership.tenant_id == tenant.id)
+                    .where(TenantMembership.is_active.is_(True))
+                    .where(TenantMembership.role == "OWNER")
+                )
+            ).scalar_one()
+            if int(owners_count) <= 1:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Cannot deactivate the last OWNER",
+                )
+
+        target.is_active = bool(payload.is_active)
+
+    await db.commit()
+
+    # Return enriched response (membership + user)
+    row = (
+        await db.execute(
+            select(TenantMembership, User)
+            .join(User, User.id == TenantMembership.user_id)
+            .where(TenantMembership.tenant_id == tenant.id)
+            .where(TenantMembership.user_id == member_user_id)
+        )
+    ).first()
+
+    if row is None:
+        raise HTTPException(status_code=500, detail="Failed to load updated member")
+
+    mem, user = row
+    return TenantMemberOut(
+        tenant_id=str(mem.tenant_id),
+        user_id=str(mem.user_id),
+        email=user.email,
+        name=getattr(user, "name", None),
+        role=_role_normalize(mem.role),
+        permissions=mem.permissions or [],
+        is_active=bool(mem.is_active),
+        created_at=mem.created_at,
+    )
 
 
 # =========================================================

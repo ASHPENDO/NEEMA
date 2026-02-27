@@ -128,12 +128,6 @@ export const getMyTenantMembership = async <T = any>(): Promise<T> => {
   return await get<T>("/api/v1/tenants/membership");
 };
 
-// Back-compat alias: your TenantMembers page may still import getTenantMembers.
-// Previously it was pointing to /api/v1/tenants/members (wrong).
-export const getTenantMembers = async <T = any>(): Promise<T> => {
-  return await getMyTenantMembership<T>();
-};
-
 /*
  * ============================================================================
  * Tenant Invitations (tenant-scoped) — uses X-Tenant-Id header automatically
@@ -146,7 +140,7 @@ export const getTenantMembers = async <T = any>(): Promise<T> => {
  * ============================================================================
  */
 
-// Align roles to backend enum (example shown: "STAFF")
+// Align roles to backend enum
 export type TenantRole = "OWNER" | "ADMIN" | "MANAGER" | "STAFF";
 
 export type TenantInvitation = {
@@ -201,4 +195,49 @@ export const resendTenantInvitation = async (inviteId: string): Promise<void> =>
 // Accept invitation (token-based)
 export const acceptTenantInvitation = async (token: string): Promise<void> => {
   await post(`/api/v1/tenants/invitations/accept`, { token });
+};
+
+/*
+ * ============================================================================
+ * Tenant Members (tenant-scoped) — list + manage (OWNER/ADMIN)
+ * Backend paths:
+ *   GET   /api/v1/tenants/members
+ *   PATCH /api/v1/tenants/members/{member_user_id}
+ * ============================================================================
+ */
+
+export type TenantMember = {
+  tenant_id: string;
+  user_id: string;
+  email: string;
+  name?: string | null;
+  role: TenantRole;
+  permissions: string[];
+  is_active: boolean;
+  created_at: string;
+};
+
+export type UpdateTenantMemberRequest = {
+  role?: TenantMember["role"];
+  is_active?: boolean;
+};
+
+export async function listTenantMembers(): Promise<TenantMember[]> {
+  return api<TenantMember[]>("/api/v1/tenants/members", { method: "GET" });
+}
+
+export async function updateTenantMember(
+  memberUserId: string,
+  payload: UpdateTenantMemberRequest
+): Promise<TenantMember> {
+  return api<TenantMember>(`/api/v1/tenants/members/${memberUserId}`, {
+    method: "PATCH",
+    body: payload,
+  });
+}
+
+// Back-compat alias: older code may import getTenantMembers.
+// Now that /members is implemented, point it to the real members list.
+export const getTenantMembers = async <T = TenantMember[]>(): Promise<T> => {
+  return (await listTenantMembers()) as unknown as T;
 };
