@@ -24,6 +24,14 @@ const TenantSelection: React.FC = () => {
 
   const canCreate = useMemo(() => newTenantName.trim().length >= 2, [newTenantName]);
 
+  // If a tenant is already selected, skip this page.
+  useEffect(() => {
+    const active = activeTenantStorage.get();
+    if (active) {
+      navigate("/dashboard", { replace: true });
+    }
+  }, [navigate]);
+
   // Fetch the list of tenants on mount
   useEffect(() => {
     const fetchTenants = async () => {
@@ -92,20 +100,13 @@ const TenantSelection: React.FC = () => {
         ) : tenants.length > 0 ? (
           <ul className="space-y-2">
             {tenants.map((tenant) => (
-              <li
-                key={tenant.id}
-                className="flex items-center justify-between p-2 border rounded-xl"
-              >
+              <li key={tenant.id} className="flex items-center justify-between p-2 border rounded-xl">
                 <div className="flex flex-col">
                   <span className="font-medium">{tenant.name}</span>
-                  {tenant.tier ? (
-                    <span className="text-xs text-slate-500">Tier: {tenant.tier}</span>
-                  ) : null}
+                  {tenant.tier ? <span className="text-xs text-slate-500">Tier: {tenant.tier}</span> : null}
                 </div>
 
-                <Button onClick={() => handleSelectTenant(tenant.id)}>
-                  Select
-                </Button>
+                <Button onClick={() => handleSelectTenant(tenant.id)}>Select</Button>
               </li>
             ))}
           </ul>

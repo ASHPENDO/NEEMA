@@ -134,16 +134,71 @@ export const getTenantMembers = async <T = any>(): Promise<T> => {
   return await getMyTenantMembership<T>();
 };
 
+/*
+ * ============================================================================
+ * Tenant Invitations (tenant-scoped) — uses X-Tenant-Id header automatically
+ * Swagger paths:
+ *   GET  /api/v1/tenants/invitations
+ *   POST /api/v1/tenants/invitations
+ *   POST /api/v1/tenants/invitations/accept
+ *   POST /api/v1/tenants/invitations/{invite_id}/revoke
+ *   POST /api/v1/tenants/invitations/{invite_id}/resend
+ * ============================================================================
+ */
+
+// Align roles to backend enum (example shown: "STAFF")
+export type TenantRole = "OWNER" | "ADMIN" | "MANAGER" | "STAFF";
+
+export type TenantInvitation = {
+  id: string;
+  tenant_id: string;
+  email: string;
+  role: TenantRole;
+  permissions?: string[];
+  token?: string;
+  expires_at?: string;
+  accepted_at?: string | null;
+  accepted_by_user_id?: string | null;
+  invited_by_user_id?: string | null;
+  created_at?: string;
+};
+
+export type CreateInvitationRequest = {
+  email: string;
+  role: TenantRole;
+  permissions?: string[];
+};
+
 // List invitations for the currently selected tenant (OWNER/ADMIN)
-export const listTenantInvitations = async <T = any[]>(): Promise<T> => {
+export const listTenantInvitations = async <T = TenantInvitation[] | { items: TenantInvitation[] }>(): Promise<T> => {
   return await get<T>("/api/v1/tenants/invitations");
 };
 
 // Invite a new member to the current tenant (OWNER/ADMIN)
-export const inviteTenantMember = async <T = any>(payload: {
+export const inviteTenantMember = async <T = TenantInvitation>(payload: {
   email: string;
-  role?: string;
+  role?: TenantRole;
   permissions?: string[];
 }): Promise<T> => {
   return await post<T>("/api/v1/tenants/invitations", payload);
+};
+
+// Strongly-typed alias (same endpoint as inviteTenantMember)
+export const createTenantInvitation = async (payload: CreateInvitationRequest): Promise<TenantInvitation> => {
+  return await post<TenantInvitation>("/api/v1/tenants/invitations", payload);
+};
+
+// Revoke invitation (Swagger uses POST, not DELETE)
+export const revokeTenantInvitation = async (inviteId: string): Promise<void> => {
+  await post(`/api/v1/tenants/invitations/${inviteId}/revoke`);
+};
+
+// Resend invitation (Swagger uses POST)
+export const resendTenantInvitation = async (inviteId: string): Promise<void> => {
+  await post(`/api/v1/tenants/invitations/${inviteId}/resend`);
+};
+
+// Accept invitation (token-based)
+export const acceptTenantInvitation = async (token: string): Promise<void> => {
+  await post(`/api/v1/tenants/invitations/accept`, { token });
 };

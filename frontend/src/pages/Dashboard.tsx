@@ -2,9 +2,11 @@ import React from "react";
 import { useAuth } from "../auth/AuthContext";
 import { Button } from "../components/Button";
 import { motion } from "framer-motion";
+import { useNavigate } from "react-router-dom"; // ✅ added
 
 export default function Dashboard() {
   const { me, logout } = useAuth();
+  const nav = useNavigate(); // ✅ added
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -24,9 +26,15 @@ export default function Dashboard() {
               </p>
             </div>
 
-            <Button variant="secondary" onClick={logout}>
-              Log out
-            </Button>
+            <div className="flex gap-2">
+              <Button onClick={() => nav("/tenant-invitations")}>
+                Invitations
+              </Button>
+
+              <Button variant="secondary" onClick={logout}>
+                Log out
+              </Button>
+            </div>
           </div>
 
           <div className="mt-6 rounded-xl bg-slate-50 border border-slate-200 p-4">
