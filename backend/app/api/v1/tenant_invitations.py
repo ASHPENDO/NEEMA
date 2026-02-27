@@ -8,7 +8,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps.tenant import get_current_tenant, require_tenant_roles
+from app.api.deps.tenant import get_current_tenant
+from app.api.deps.permissions import require_permissions
+from app.auth.permissions import PERM
 from app.api.v1.auth import get_current_user
 from app.core.tier_limits import get_staff_limit_for_tier
 from app.core.tier_resolver import resolve_effective_tier
@@ -46,19 +48,19 @@ def _generate_token() -> str:
 
 
 # =========================================================
-# CREATE + LIST (tenant-scoped; OWNER/ADMIN only)
+# CREATE + LIST (tenant-scoped; permission-gated)
 # =========================================================
 @router.post("", response_model=TenantInviteOut)
 async def create_tenant_invitation(
     payload: TenantInviteCreate,
     db: AsyncSession = Depends(get_db),
     tenant: Tenant = Depends(get_current_tenant),
-    _member: TenantMembership = Depends(require_tenant_roles("OWNER", "ADMIN")),
+    _member: TenantMembership = Depends(require_permissions(PERM.TENANT_INVITES_MANAGE)),
     _inviter: User = Depends(get_current_user),
 ):
     """
     Create a tenant staff invitation (ADMIN/STAFF).
-    Requires JWT + X-Tenant-Id + role OWNER/ADMIN in that tenant.
+    Requires JWT + X-Tenant-Id + permission tenant.invites.manage in that tenant.
 
     IMPORTANT: Staff slots are consumed ONLY when accepted.
     """
@@ -134,10 +136,10 @@ async def create_tenant_invitation(
 async def list_tenant_invitations(
     db: AsyncSession = Depends(get_db),
     tenant: Tenant = Depends(get_current_tenant),
-    _member: TenantMembership = Depends(require_tenant_roles("OWNER", "ADMIN")),
+    _member: TenantMembership = Depends(require_permissions(PERM.TENANT_INVITES_MANAGE)),
 ):
     """
-    List invitations for the current tenant (requires X-Tenant-Id + OWNER/ADMIN).
+    List invitations for the current tenant (requires X-Tenant-Id + tenant.invites.manage).
     """
     stmt = (
         select(TenantInvitation)

@@ -15,8 +15,9 @@ from app.api.v1.auth import get_current_user
 from app.api.deps.tenant import (
     get_current_tenant,
     get_current_membership,
-    require_tenant_roles,
 )
+from app.api.deps.permissions import require_permissions
+from app.auth.permissions import PERM
 from app.core.sales_attribution import (
     compute_commission_kes,
     normalize_referral_code,
@@ -189,7 +190,7 @@ async def get_my_membership_in_current_tenant(
 
 @router.get("/admin-only")
 async def admin_only_check(
-    _membership: TenantMembership = Depends(require_tenant_roles("OWNER", "ADMIN")),
+    _membership: TenantMembership = Depends(require_permissions(PERM.TENANT_WRITE)),
 ):
     return {"ok": True}
 
@@ -201,7 +202,7 @@ async def admin_only_check(
 async def list_tenant_members(
     db: AsyncSession = Depends(get_db),
     tenant: Tenant = Depends(get_current_tenant),
-    _membership: TenantMembership = Depends(require_tenant_roles("OWNER", "ADMIN")),
+    _membership: TenantMembership = Depends(require_permissions(PERM.TENANT_MEMBERS_READ)),
 ):
     stmt = (
         select(TenantMembership, User)
@@ -237,6 +238,7 @@ async def update_tenant_member(
     tenant: Tenant = Depends(get_current_tenant),
     actor: User = Depends(get_current_user),
     actor_membership: TenantMembership = Depends(get_current_membership),
+    _rbac: TenantMembership = Depends(require_permissions(PERM.TENANT_MEMBERS_WRITE)),
 ):
     """
     Update a member inside the current tenant.
@@ -365,7 +367,7 @@ async def create_tenant_invitation(
     payload: TenantInviteCreate,
     db: AsyncSession = Depends(get_db),
     tenant: Tenant = Depends(get_current_tenant),
-    _membership: TenantMembership = Depends(require_tenant_roles("OWNER", "ADMIN")),
+    _membership: TenantMembership = Depends(require_permissions(PERM.TENANT_INVITES_MANAGE)),
 ):
     role = _role_normalize(payload.role)
     if role not in {"ADMIN", "STAFF"}:
@@ -419,7 +421,7 @@ async def create_tenant_invitation(
 async def list_tenant_invitations(
     db: AsyncSession = Depends(get_db),
     tenant: Tenant = Depends(get_current_tenant),
-    _membership: TenantMembership = Depends(require_tenant_roles("OWNER", "ADMIN")),
+    _membership: TenantMembership = Depends(require_permissions(PERM.TENANT_INVITES_MANAGE)),
 ):
     stmt = (
         select(TenantInvitation)
@@ -579,7 +581,7 @@ async def revoke_tenant_invitation(
     invite_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     tenant: Tenant = Depends(get_current_tenant),
-    _membership: TenantMembership = Depends(require_tenant_roles("OWNER", "ADMIN")),
+    _membership: TenantMembership = Depends(require_permissions(PERM.TENANT_INVITES_MANAGE)),
     _actor: User = Depends(get_current_user),
 ):
     inv = (
@@ -613,7 +615,7 @@ async def resend_tenant_invitation(
     invite_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     tenant: Tenant = Depends(get_current_tenant),
-    _membership: TenantMembership = Depends(require_tenant_roles("OWNER", "ADMIN")),
+    _membership: TenantMembership = Depends(require_permissions(PERM.TENANT_INVITES_MANAGE)),
 ):
     inv = (
         await db.execute(
