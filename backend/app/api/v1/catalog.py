@@ -4,7 +4,8 @@ import uuid
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.api.deps.permissions import require_permissions
@@ -16,24 +17,25 @@ router = APIRouter(prefix="/catalog/items", tags=["catalog"])
 
 
 @router.get("", response_model=List[CatalogItemResponse])
-def list_catalog_items(
-    db: Session = Depends(get_db),
+async def list_catalog_items(
+    db: AsyncSession = Depends(get_db),
     membership=Depends(get_current_membership),
     _=Depends(require_permissions("catalog.read")),
 ):
-    items = (
-        db.query(CatalogItem)
-        .filter(CatalogItem.tenant_id == membership.tenant_id)
+    stmt = (
+        select(CatalogItem)
+        .where(CatalogItem.tenant_id == membership.tenant_id)
         .order_by(CatalogItem.created_at.desc())
-        .all()
     )
+    result = await db.execute(stmt)
+    items = result.scalars().all()
     return items
 
 
 @router.post("", response_model=CatalogItemResponse, status_code=status.HTTP_201_CREATED)
-def create_catalog_item(
+async def create_catalog_item(
     payload: CatalogItemCreate,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     membership=Depends(get_current_membership),
     _=Depends(require_permissions("catalog.write")),
 ):
@@ -50,67 +52,74 @@ def create_catalog_item(
     )
 
     db.add(item)
-    db.commit()
-    db.refresh(item)
+    await db.commit()
+    await db.refresh(item)
     return item
 
 
 @router.get("/{item_id}", response_model=CatalogItemResponse)
-def get_catalog_item(
+async def get_catalog_item(
     item_id: uuid.UUID,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     membership=Depends(get_current_membership),
     _=Depends(require_permissions("catalog.read")),
 ):
-    item = (
-        db.query(CatalogItem)
-        .filter(CatalogItem.id == item_id, CatalogItem.tenant_id == membership.tenant_id)
-        .first()
+    stmt = select(CatalogItem).where(
+        CatalogItem.id == item_id,
+        CatalogItem.tenant_id == membership.tenant_id,
     )
+    result = await db.execute(stmt)
+    item = result.scalars().first()
+
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
+
     return item
 
 
 @router.patch("/{item_id}", response_model=CatalogItemResponse)
-def update_catalog_item(
+async def update_catalog_item(
     item_id: uuid.UUID,
     payload: CatalogItemUpdate,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     membership=Depends(get_current_membership),
     _=Depends(require_permissions("catalog.write")),
 ):
-    item = (
-        db.query(CatalogItem)
-        .filter(CatalogItem.id == item_id, CatalogItem.tenant_id == membership.tenant_id)
-        .first()
+    stmt = select(CatalogItem).where(
+        CatalogItem.id == item_id,
+        CatalogItem.tenant_id == membership.tenant_id,
     )
+    result = await db.execute(stmt)
+    item = result.scalars().first()
+
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
 
     for field, value in payload.dict(exclude_unset=True).items():
         setattr(item, field, value)
 
-    db.commit()
-    db.refresh(item)
+    await db.commit()
+    await db.refresh(item)
     return item
 
 
 @router.delete("/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_catalog_item(
+async def delete_catalog_item(
     item_id: uuid.UUID,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     membership=Depends(get_current_membership),
     _=Depends(require_permissions("catalog.delete")),
 ):
-    item = (
-        db.query(CatalogItem)
-        .filter(CatalogItem.id == item_id, CatalogItem.tenant_id == membership.tenant_id)
-        .first()
+    stmt = select(CatalogItem).where(
+        CatalogItem.id == item_id,
+        CatalogItem.tenant_id == membership.tenant_id,
     )
+    result = await db.execute(stmt)
+    item = result.scalars().first()
+
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
 
-    db.delete(item)
-    db.commit()
+    await db.delete(item)
+    await db.commit()
     return None
