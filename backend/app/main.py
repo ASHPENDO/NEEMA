@@ -9,6 +9,7 @@ from app.api.v1.tenants import router as tenants_router
 from app.api.v1.platform_invitations import router as platform_invitations_router
 from app.api.v1.sales import router as sales_router
 from app.api.v1.platform_sales import router as platform_sales_router
+from app.api.v1.catalog import router as catalog_router
 
 
 def create_application() -> FastAPI:
@@ -21,7 +22,6 @@ def create_application() -> FastAPI:
             # 🔹 Local development (Vite frontend)
             "http://localhost:5173",
             "http://127.0.0.1:5173",
-
             # 🔹 Production domains
             "https://postika.co.ke",
             "https://www.postika.co.ke",
@@ -44,6 +44,7 @@ def create_application() -> FastAPI:
     app.include_router(platform_invitations_router, prefix="/api/v1")
     app.include_router(sales_router, prefix="/api/v1")
     app.include_router(platform_sales_router, prefix="/api/v1")
+    app.include_router(catalog_router, prefix="/api/v1")
 
     return app
 
