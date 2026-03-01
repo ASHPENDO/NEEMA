@@ -11,7 +11,11 @@ from app.db.session import get_db
 from app.api.deps.permissions import require_permissions
 from app.api.deps.tenant import get_current_membership
 from app.models.catalog_item import CatalogItem
-from app.schemas.catalog import CatalogItemCreate, CatalogItemUpdate, CatalogItemResponse
+from app.schemas.catalog import (
+    CatalogItemCreate,
+    CatalogItemUpdate,
+    CatalogItemResponse,
+)
 
 router = APIRouter(prefix="/catalog/items", tags=["catalog"])
 
@@ -20,7 +24,7 @@ router = APIRouter(prefix="/catalog/items", tags=["catalog"])
 async def list_catalog_items(
     db: AsyncSession = Depends(get_db),
     membership=Depends(get_current_membership),
-    _=Depends(require_permissions("catalog.read")),
+    _=Depends(require_permissions("catalog:read")),
 ):
     stmt = (
         select(CatalogItem)
@@ -32,12 +36,16 @@ async def list_catalog_items(
     return items
 
 
-@router.post("", response_model=CatalogItemResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=CatalogItemResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def create_catalog_item(
     payload: CatalogItemCreate,
     db: AsyncSession = Depends(get_db),
     membership=Depends(get_current_membership),
-    _=Depends(require_permissions("catalog.write")),
+    _=Depends(require_permissions("catalog:create")),
 ):
     item = CatalogItem(
         id=uuid.uuid4(),
@@ -62,7 +70,7 @@ async def get_catalog_item(
     item_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     membership=Depends(get_current_membership),
-    _=Depends(require_permissions("catalog.read")),
+    _=Depends(require_permissions("catalog:read")),
 ):
     stmt = select(CatalogItem).where(
         CatalogItem.id == item_id,
@@ -83,7 +91,7 @@ async def update_catalog_item(
     payload: CatalogItemUpdate,
     db: AsyncSession = Depends(get_db),
     membership=Depends(get_current_membership),
-    _=Depends(require_permissions("catalog.write")),
+    _=Depends(require_permissions("catalog:update")),
 ):
     stmt = select(CatalogItem).where(
         CatalogItem.id == item_id,
@@ -108,7 +116,7 @@ async def delete_catalog_item(
     item_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     membership=Depends(get_current_membership),
-    _=Depends(require_permissions("catalog.delete")),
+    _=Depends(require_permissions("catalog:delete")),
 ):
     stmt = select(CatalogItem).where(
         CatalogItem.id == item_id,

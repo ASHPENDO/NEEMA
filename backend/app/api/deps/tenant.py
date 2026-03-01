@@ -11,7 +11,7 @@ from app.models.user import User
 from app.models.tenant import Tenant
 from app.models.tenant_membership import TenantMembership
 
-ALLOWED_TENANT_ROLES = {"OWNER", "ADMIN", "STAFF"}
+ALLOWED_TENANT_ROLES = {"OWNER", "ADMIN", "MANAGER", "STAFF"}
 
 
 async def get_current_tenant(
