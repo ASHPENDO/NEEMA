@@ -1,8 +1,10 @@
+# app/api/v1/tenant_invitations.py
 from __future__ import annotations
 
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import List
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, func
@@ -11,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps.tenant import get_current_tenant
 from app.api.deps.permissions import require_permissions
 from app.api.v1.auth import get_current_user
-from app.auth.permissions import PERM
+from app.auth.permissions import Permission
 from app.core.tier_limits import get_admin_limit_for_tier, get_staff_limit_for_tier
 from app.core.tier_resolver import resolve_effective_tier
 from app.db.session import get_db
@@ -66,7 +68,7 @@ async def create_tenant_invitation(
     payload: TenantInviteCreate,
     db: AsyncSession = Depends(get_db),
     tenant: Tenant = Depends(get_current_tenant),
-    _member: TenantMembership = Depends(require_permissions(PERM.TENANT_INVITES_MANAGE)),
+    _member: TenantMembership = Depends(require_permissions(Permission.MEMBERS_INVITE.value)),
     _inviter: User = Depends(get_current_user),
 ):
     """
@@ -170,7 +172,7 @@ async def create_tenant_invitation(
 async def list_tenant_invitations(
     db: AsyncSession = Depends(get_db),
     tenant: Tenant = Depends(get_current_tenant),
-    _member: TenantMembership = Depends(require_permissions(PERM.TENANT_INVITES_MANAGE)),
+    _member: TenantMembership = Depends(require_permissions(Permission.MEMBERS_INVITE.value)),
 ):
     stmt = (
         select(TenantInvitation)
@@ -191,9 +193,7 @@ async def accept_tenant_invitation(
 ):
     """
     Accept invitation by token (AUTHENTICATED; magic-code).
-    Hard-enforces:
-      - 1 ADMIN per tenant (all tiers)
-      - STAFF limit by tier (sungura=1, swara=4, ndovu=9)
+    Hard-enforces seat limits at accept time.
     """
     if payload.accept_tos is not True:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="accept_tos must be true")
@@ -349,10 +349,10 @@ async def accept_tenant_invitation(
 
 @router.post("/{invite_id}/revoke", status_code=status.HTTP_204_NO_CONTENT)
 async def revoke_tenant_invitation(
-    invite_id,
+    invite_id: UUID,
     db: AsyncSession = Depends(get_db),
     tenant: Tenant = Depends(get_current_tenant),
-    _member: TenantMembership = Depends(require_permissions(PERM.TENANT_INVITES_MANAGE)),
+    _member: TenantMembership = Depends(require_permissions(Permission.MEMBERS_INVITE.value)),
     _actor: User = Depends(get_current_user),
 ):
     inv = (
@@ -382,10 +382,10 @@ async def revoke_tenant_invitation(
 
 @router.post("/{invite_id}/resend", status_code=status.HTTP_204_NO_CONTENT)
 async def resend_tenant_invitation(
-    invite_id,
+    invite_id: UUID,
     db: AsyncSession = Depends(get_db),
     tenant: Tenant = Depends(get_current_tenant),
-    _member: TenantMembership = Depends(require_permissions(PERM.TENANT_INVITES_MANAGE)),
+    _member: TenantMembership = Depends(require_permissions(Permission.MEMBERS_INVITE.value)),
 ):
     inv = (
         await db.execute(

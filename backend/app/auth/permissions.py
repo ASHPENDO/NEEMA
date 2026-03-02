@@ -233,3 +233,25 @@ SENSITIVE_PERMISSIONS: FrozenSet[str] = frozenset(
         Permission.SECURITY_MANAGE.value,
     }
 )
+
+# -------------------------------------------------------------------
+# Backwards-compatible PERM shim (legacy PERM.TENANT_* constants)
+# -------------------------------------------------------------------
+# Older modules still reference:
+#   PERM.TENANT_WRITE
+#   PERM.TENANT_MEMBERS_READ
+#   PERM.TENANT_MEMBERS_WRITE
+#   PERM.TENANT_INVITES_MANAGE
+#
+# We map these to the new permission taxonomy.
+
+class _LegacyPERM:
+    TENANT_WRITE = Permission.MEMBERS_INVITE.value
+
+    TENANT_MEMBERS_READ = Permission.MEMBERS_READ.value
+    TENANT_MEMBERS_WRITE = Permission.MEMBERS_UPDATE_ROLE.value
+
+    TENANT_INVITES_MANAGE = Permission.MEMBERS_INVITE.value
+
+
+PERM = _LegacyPERM()

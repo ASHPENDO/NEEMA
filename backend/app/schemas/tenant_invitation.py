@@ -10,6 +10,7 @@ from pydantic import BaseModel, EmailStr, Field
 class TenantInviteCreate(BaseModel):
     email: EmailStr
     role: str = Field(default="STAFF", description="ADMIN or STAFF")
+    # Optional overrides. Usually keep empty so role defaults apply.
     permissions: List[str] = Field(default_factory=list)
 
 

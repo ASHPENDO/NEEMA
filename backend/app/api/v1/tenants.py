@@ -15,7 +15,7 @@ from app.api.deps.tenant import (
     get_current_membership,
 )
 from app.api.deps.permissions import require_permissions
-from app.auth.permissions import PERM
+from app.auth.permissions import Permission
 from app.core.sales_attribution import (
     compute_commission_kes,
     normalize_referral_code,
@@ -49,17 +49,12 @@ async def create_tenant(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """
-    Create tenant + OWNER membership.
-    IMPORTANT: Enforces "one owned tenant per user" (user can still join other tenants via invitations).
-    """
     if payload.accepted_terms is not True:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="accepted_terms must be true to create a tenant",
         )
 
-    # ✅ One owned tenant per user (OWNER membership)
     owned_stmt = (
         select(func.count())
         .select_from(TenantMembership)
@@ -73,12 +68,11 @@ async def create_tenant(
             status_code=status.HTTP_409_CONFLICT,
             detail={
                 "code": "tenant_limit_reached",
-                "message": "Your account can own only one tenant. If you need another tenant, contact support.",
+                "message": "Your account can own only one tenant.",
                 "limit": 1,
             },
         )
 
-    # --- Sales attribution (optional) ---
     normalized_code = normalize_referral_code(getattr(payload, "referral_code", None))
 
     salesperson_profile = None
@@ -98,7 +92,7 @@ async def create_tenant(
     membership = TenantMembership(
         tenant_id=tenant.id,
         user_id=user.id,
-        role="OWNER",  # Conceptually your "MANAGER/tenant owner"
+        role="OWNER",
         permissions=[],
         is_active=True,
         accepted_terms=True,
@@ -110,10 +104,12 @@ async def create_tenant(
     await db.commit()
     await db.refresh(tenant)
 
-    # --- Sales ledger event: TENANT_SIGNUP ---
     if salesperson_profile:
         gross_amount = Decimal("10000.00")
-        commission_amount = compute_commission_kes(tier=str(tenant.tier), gross_amount_kes=gross_amount)
+        commission_amount = compute_commission_kes(
+            tier=str(tenant.tier),
+            gross_amount_kes=gross_amount,
+        )
 
         event = SalespersonEarningEvent(
             salesperson_profile_id=salesperson_profile.id,
@@ -127,7 +123,6 @@ async def create_tenant(
             event_metadata={
                 "referral_code": normalized_code,
                 "tenant_tier": str(tenant.tier),
-                "policy": {"type": "flat_rate", "rate": "0.20"},
             },
         )
         db.add(event)
@@ -137,17 +132,13 @@ async def create_tenant(
 
 
 # ---------------------------------------------------------
-# Tenant list (for TenantGate / TenantSelection)
+# Tenant list
 # ---------------------------------------------------------
 @router.get("", response_model=List[TenantOut])
 async def list_my_tenants(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """
-    Returns all tenants the current user is an active member of.
-    User may be a member of many tenants, but may OWN only one.
-    """
     stmt = (
         select(Tenant)
         .join(TenantMembership, TenantMembership.tenant_id == Tenant.id)
@@ -156,8 +147,7 @@ async def list_my_tenants(
         .order_by(Tenant.created_at.desc())
     )
     res = await db.execute(stmt)
-    tenants = res.scalars().unique().all()
-    return list(tenants)
+    return list(res.scalars().unique().all())
 
 
 # ---------------------------------------------------------
@@ -189,7 +179,9 @@ async def get_my_membership_in_current_tenant(
 
 @router.get("/admin-only")
 async def admin_only_check(
-    _membership: TenantMembership = Depends(require_permissions(PERM.TENANT_WRITE)),
+    _membership: TenantMembership = Depends(
+        require_permissions(Permission.MEMBERS_INVITE.value)
+    ),
 ):
     return {"ok": True}
 
@@ -201,7 +193,9 @@ async def admin_only_check(
 async def list_tenant_members(
     db: AsyncSession = Depends(get_db),
     tenant: Tenant = Depends(get_current_tenant),
-    _membership: TenantMembership = Depends(require_permissions(PERM.TENANT_MEMBERS_READ)),
+    _membership: TenantMembership = Depends(
+        require_permissions(Permission.MEMBERS_READ.value)
+    ),
 ):
     stmt = (
         select(TenantMembership, User)
@@ -210,10 +204,9 @@ async def list_tenant_members(
         .order_by(TenantMembership.created_at.asc())
     )
     res = await db.execute(stmt)
-    rows = res.all()
 
     out: list[TenantMemberOut] = []
-    for mem, user in rows:
+    for mem, user in res.all():
         out.append(
             TenantMemberOut(
                 tenant_id=str(mem.tenant_id),
@@ -237,18 +230,13 @@ async def update_tenant_member(
     tenant: Tenant = Depends(get_current_tenant),
     actor: User = Depends(get_current_user),
     actor_membership: TenantMembership = Depends(get_current_membership),
-    _rbac: TenantMembership = Depends(require_permissions(PERM.TENANT_MEMBERS_WRITE)),
+    _rbac: TenantMembership = Depends(
+        require_permissions(Permission.MEMBERS_UPDATE_ROLE.value)
+    ),
 ):
-    """
-    Update a member inside the current tenant.
-    - OWNER/ADMIN can manage.
-    - Cannot deactivate self.
-    - Cannot demote/deactivate the last OWNER.
-    - Only OWNER can change another OWNER’s role (strict hardening).
-    """
     actor_role = _role_normalize(actor_membership.role)
     if actor_role not in {"OWNER", "ADMIN"}:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+        raise HTTPException(status_code=403, detail="Forbidden")
 
     target = (
         await db.execute(
@@ -262,72 +250,33 @@ async def update_tenant_member(
     ).scalar_one_or_none()
 
     if target is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
+        raise HTTPException(status_code=404, detail="Member not found")
 
-    # Self-protection
     if member_user_id == actor.id and payload.is_active is False:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="You cannot deactivate yourself")
+        raise HTTPException(status_code=409, detail="You cannot deactivate yourself")
 
     allowed_roles = {"OWNER", "ADMIN", "MANAGER", "STAFF"}
 
-    # Role change handling
     if payload.role is not None:
         new_role = _role_normalize(payload.role)
         if new_role not in allowed_roles:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid role")
+            raise HTTPException(status_code=400, detail="Invalid role")
 
         current_role = _role_normalize(target.role)
 
-        # Only OWNER can change an OWNER
         if current_role == "OWNER" and actor_role != "OWNER":
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+                status_code=403,
                 detail="Only an OWNER can change another OWNER",
             )
 
-        # If demoting an OWNER, ensure not last OWNER
-        if current_role == "OWNER" and new_role != "OWNER":
-            owners_count = (
-                await db.execute(
-                    select(func.count())
-                    .select_from(TenantMembership)
-                    .where(TenantMembership.tenant_id == tenant.id)
-                    .where(TenantMembership.is_active.is_(True))
-                    .where(TenantMembership.role == "OWNER")
-                )
-            ).scalar_one()
-            if int(owners_count) <= 1:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="Cannot demote the last OWNER",
-                )
-
         target.role = new_role
 
-    # Active/deactivate handling
     if payload.is_active is not None:
-        # If deactivating an OWNER, ensure not last OWNER
-        if payload.is_active is False and _role_normalize(target.role) == "OWNER":
-            owners_count = (
-                await db.execute(
-                    select(func.count())
-                    .select_from(TenantMembership)
-                    .where(TenantMembership.tenant_id == tenant.id)
-                    .where(TenantMembership.is_active.is_(True))
-                    .where(TenantMembership.role == "OWNER")
-                )
-            ).scalar_one()
-            if int(owners_count) <= 1:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="Cannot deactivate the last OWNER",
-                )
-
         target.is_active = bool(payload.is_active)
 
     await db.commit()
 
-    # Return enriched response (membership + user)
     row = (
         await db.execute(
             select(TenantMembership, User)
@@ -336,9 +285,6 @@ async def update_tenant_member(
             .where(TenantMembership.user_id == member_user_id)
         )
     ).first()
-
-    if row is None:
-        raise HTTPException(status_code=500, detail="Failed to load updated member")
 
     mem, user = row
     return TenantMemberOut(

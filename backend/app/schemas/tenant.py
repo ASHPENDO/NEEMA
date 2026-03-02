@@ -56,6 +56,7 @@ class TenantOut(BaseModel):
 class TenantInviteCreate(BaseModel):
     email: EmailStr
     role: str = Field(default="STAFF")
+    # Optional: permissions overrides for this membership (usually keep empty to use role defaults)
     permissions: List[str] = Field(default_factory=list)
 
 
