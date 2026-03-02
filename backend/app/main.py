@@ -42,7 +42,11 @@ def create_application() -> FastAPI:
     # Routers
     app.include_router(auth_router, prefix="/api/v1")
     app.include_router(tenants_router, prefix="/api/v1")
+
+    # ✅ Tenant Invitations (FIX: ensure this is mounted)
     app.include_router(tenant_invitations_router, prefix="/api/v1")
+
+    # Platform / Sales / Catalog
     app.include_router(platform_invitations_router, prefix="/api/v1")
     app.include_router(sales_router, prefix="/api/v1")
     app.include_router(platform_sales_router, prefix="/api/v1")
