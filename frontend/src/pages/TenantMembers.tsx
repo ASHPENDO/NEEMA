@@ -5,6 +5,7 @@ import { api, ApiError, type TenantRole, type TenantMember } from "../lib/api";
 import { activeTenantStorage } from "../lib/tenantStorage";
 import { PageShell } from "../components/PageShell";
 import { Button } from "../components/Button";
+import { useAccess } from "../hooks/useAccess";
 
 type UpdateTenantMemberRequest = {
   role?: TenantRole;
@@ -24,10 +25,15 @@ export default function TenantMembers() {
   const nav = useNavigate();
   const tenantId = useMemo(() => activeTenantStorage.get(), []);
 
+  const { can, canAny } = useAccess();
+  const canReadMembers = canAny(["tenant.members.read", "tenant.members.write"]);
+  const canWriteMembers = can("tenant.members.write");
+
   const [items, setItems] = useState<TenantMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [permissionDenied, setPermissionDenied] = useState(false);
   const [rowBusyId, setRowBusyId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -42,14 +48,31 @@ export default function TenantMembers() {
       setLoading(true);
       setError(null);
 
+      // UI gating: if you can’t even read, don’t try (but still allow backend truth if you prefer)
+      if (!canReadMembers) {
+        setPermissionDenied(true);
+        setItems([]);
+        setLoading(false);
+        return;
+      }
+
       try {
         const res = await api<TenantMember[]>("/api/v1/tenants/members", { method: "GET" });
-        if (!cancelled) setItems(Array.isArray(res) ? res : []);
+        if (!cancelled) {
+          setItems(Array.isArray(res) ? res : []);
+          setPermissionDenied(false);
+        }
       } catch (e) {
         if (cancelled) return;
 
         if (e instanceof ApiError) {
-          setError(e.message || `Request failed (${e.status})`);
+          if (e.status === 403) {
+            setPermissionDenied(true);
+            setItems([]);
+            setError("You don’t have permission to view tenant members.");
+          } else {
+            setError(e.message || `Request failed (${e.status})`);
+          }
         } else {
           setError("Request failed");
         }
@@ -69,12 +92,27 @@ export default function TenantMembers() {
     setLoading(true);
     setError(null);
 
+    if (!canReadMembers) {
+      setPermissionDenied(true);
+      setItems([]);
+      setLoading(false);
+      return;
+    }
+
     try {
       const res = await api<TenantMember[]>("/api/v1/tenants/members", { method: "GET" });
       setItems(Array.isArray(res) ? res : []);
+      setPermissionDenied(false);
     } catch (e) {
       const err = e as ApiError;
-      setError(err?.message ?? "Failed to load members.");
+
+      if (err?.status === 403) {
+        setPermissionDenied(true);
+        setItems([]);
+        setError("You don’t have permission to view tenant members.");
+      } else {
+        setError(err?.message ?? "Failed to load members.");
+      }
     } finally {
       setLoading(false);
     }
@@ -88,6 +126,12 @@ export default function TenantMembers() {
   }
 
   async function onChangeRole(member: TenantMember, nextRole: TenantRole) {
+    if (!canWriteMembers) {
+      setPermissionDenied(true);
+      alert("Forbidden: you don’t have permission to change roles.");
+      return;
+    }
+
     setRowBusyId(member.user_id);
     try {
       const updated = await patchMember(member.user_id, { role: nextRole });
@@ -98,6 +142,7 @@ export default function TenantMembers() {
       if (err.status === 409) {
         alert(err.message ?? "Role change not allowed.");
       } else if (err.status === 403) {
+        setPermissionDenied(true);
         alert("Forbidden: you don’t have permission to change roles.");
       } else if (err.status === 401) {
         alert("Not authenticated. Please sign in again.");
@@ -110,7 +155,12 @@ export default function TenantMembers() {
   }
 
   async function onToggleActive(member: TenantMember, nextActive: boolean) {
-    // NOTE: Backend blocks self-deactivate and last-owner rules; UI doesn't infer "me" here.
+    if (!canWriteMembers) {
+      setPermissionDenied(true);
+      alert("Forbidden: you don’t have permission to manage members.");
+      return;
+    }
+
     const ok = window.confirm(nextActive ? "Reactivate this member?" : "Deactivate this member?");
     if (!ok) return;
 
@@ -124,6 +174,7 @@ export default function TenantMembers() {
       if (err.status === 409) {
         alert(err.message ?? "This change is not allowed.");
       } else if (err.status === 403) {
+        setPermissionDenied(true);
         alert("Forbidden: you don’t have permission to manage members.");
       } else if (err.status === 401) {
         alert("Not authenticated. Please sign in again.");
@@ -135,9 +186,23 @@ export default function TenantMembers() {
     }
   }
 
+  const readOnly = canReadMembers && !canWriteMembers;
+
   return (
     <PageShell title="Tenant Members" subtitle="Manage who can access this tenant.">
       <div className="space-y-4">
+        {permissionDenied && (
+          <div className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 p-3 text-yellow-200 text-sm">
+            You don’t have permission to manage tenant members in this tenant.
+          </div>
+        )}
+
+        {readOnly && (
+          <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-3 text-sky-200 text-sm">
+            You have read-only access to members. Editing roles/active status is disabled.
+          </div>
+        )}
+
         <div className="flex items-center justify-between">
           <div className="text-white/80 text-sm">Members list (tenant-scoped).</div>
           <div className="flex gap-2">
@@ -178,6 +243,7 @@ export default function TenantMembers() {
                 <tbody className="text-white/90">
                   {items.map((m) => {
                     const busy = rowBusyId === m.user_id;
+                    const disableWrites = busy || readOnly || permissionDenied;
 
                     return (
                       <tr key={m.user_id} className="border-b border-white/5">
@@ -186,7 +252,7 @@ export default function TenantMembers() {
                         <td className="py-2 pr-3">
                           <select
                             value={m.role}
-                            disabled={busy}
+                            disabled={disableWrites}
                             onChange={(e) => onChangeRole(m, e.target.value as TenantRole)}
                             className="rounded-xl bg-black/20 border border-white/10 px-3 py-2 text-white"
                           >
@@ -204,7 +270,7 @@ export default function TenantMembers() {
                         <td className="py-2 text-right">
                           <Button
                             variant={m.is_active ? "danger" : "secondary"}
-                            disabled={busy}
+                            disabled={disableWrites}
                             onClick={() => onToggleActive(m, !m.is_active)}
                           >
                             {busy ? "Saving..." : m.is_active ? "Deactivate" : "Reactivate"}

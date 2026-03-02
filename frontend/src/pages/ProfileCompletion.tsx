@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from "react";
+// frontend/src/pages/ProfileCompletion.tsx
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { PageShell } from "../components/PageShell";
 import { Input } from "../components/Input";
@@ -33,6 +34,13 @@ export default function ProfileCompletion() {
     return undefined;
   }, [phoneE164]);
 
+  // If already complete, avoid trapping user (navigate via effect, not during render)
+  useEffect(() => {
+    if (isProfileComplete(me)) {
+      nav("/tenant-gate", { replace: true });
+    }
+  }, [me, nav]);
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setServerError(null);
@@ -53,8 +61,8 @@ export default function ProfileCompletion() {
       // Clear optional password field (since it's not persisted yet)
       setPassword("");
 
-      // after update, allow dashboard
-      nav("/dashboard", { replace: true });
+      // Funnel through TenantGate (tenant routing + consistency)
+      nav("/tenant-gate", { replace: true });
     } catch (err) {
       if (err instanceof ApiError) setServerError(err.message);
       else setServerError("Could not update your profile. Try again.");
@@ -63,16 +71,8 @@ export default function ProfileCompletion() {
     }
   }
 
-  // If already complete, avoid trapping user
-  if (isProfileComplete(me)) {
-    nav("/dashboard", { replace: true });
-  }
-
   return (
-    <PageShell
-      title="Complete your profile"
-      subtitle="Add your basic details to finish setting up your account."
-    >
+    <PageShell title="Complete your profile" subtitle="Add your basic details to finish setting up your account.">
       {serverError ? (
         <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {serverError}

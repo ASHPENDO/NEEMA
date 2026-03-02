@@ -5,21 +5,21 @@ import { Button } from "../components/Button";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { activeTenantStorage } from "../lib/tenantStorage";
-import { useTenantMembership } from "../hooks/useTenantMembership";
-
-function canManage(role?: string | null) {
-  return role === "OWNER" || role === "ADMIN";
-}
+import { useAccess } from "../hooks/useAccess";
 
 export default function Dashboard() {
   const { me, logout } = useAuth();
   const nav = useNavigate();
 
   const tenantId = useMemo(() => activeTenantStorage.get(), []);
-  const { membership, error: memError } = useTenantMembership();
+  const { membership, error: memError, can, canAny } = useAccess();
 
   const role = membership?.role ?? null;
-  const isAdmin = canManage(role);
+
+  const canSeeMembers = canAny(["tenant.members.read", "tenant.members.write"]);
+  const canSeeInvites = can("tenant.invites.manage");
+
+  const showAdminTools = Boolean(tenantId) && (canSeeMembers || canSeeInvites);
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -53,13 +53,8 @@ export default function Dashboard() {
             </div>
 
             <div className="flex gap-2">
-              {isAdmin && (
-                <>
-                  <Button onClick={() => nav("/tenant-members")}>Members</Button>
-
-                  <Button onClick={() => nav("/tenant-invitations")}>Invitations</Button>
-                </>
-              )}
+              {canSeeMembers && <Button onClick={() => nav("/tenant-members")}>Members</Button>}
+              {canSeeInvites && <Button onClick={() => nav("/tenant-invitations")}>Invitations</Button>}
 
               <Button variant="secondary" onClick={logout}>
                 Log out
@@ -67,10 +62,9 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {!isAdmin && tenantId && (
+          {!showAdminTools && tenantId && (
             <div className="mt-4 rounded-xl bg-slate-50 border border-slate-200 p-4 text-sm text-slate-700">
-              Admin tools (Members, Invitations) are available only to{" "}
-              <span className="font-medium">Owners</span> and <span className="font-medium">Admins</span>.
+              You don’t have permission to access admin tools (Members / Invitations) for this tenant.
             </div>
           )}
 

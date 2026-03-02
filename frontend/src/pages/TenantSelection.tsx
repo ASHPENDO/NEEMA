@@ -1,5 +1,6 @@
+// frontend/src/pages/TenantSelection.tsx
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { getTenants, createTenant } from "../lib/api";
 import { activeTenantStorage } from "../lib/tenantStorage";
@@ -13,8 +14,20 @@ type TenantOut = {
   is_active?: boolean;
 };
 
+function safeNext(nextParam: string | null): string | null {
+  if (!nextParam) return null;
+  const v = nextParam.trim();
+  if (!v) return null;
+  if (v.startsWith("/") && !v.startsWith("//")) return v;
+  return null;
+}
+
 const TenantSelection: React.FC = () => {
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+
+  const nextParam = useMemo(() => safeNext(params.get("next")), [params]);
+  const afterPick = useMemo(() => nextParam ?? "/dashboard", [nextParam]);
 
   const [tenants, setTenants] = useState<TenantOut[]>([]);
   const [newTenantName, setNewTenantName] = useState("");
@@ -24,13 +37,13 @@ const TenantSelection: React.FC = () => {
 
   const canCreate = useMemo(() => newTenantName.trim().length >= 2, [newTenantName]);
 
-  // If a tenant is already selected, skip this page.
+  // If a tenant is already selected, skip this page (respect next if present)
   useEffect(() => {
     const active = activeTenantStorage.get();
     if (active) {
-      navigate("/dashboard", { replace: true });
+      navigate(afterPick, { replace: true });
     }
-  }, [navigate]);
+  }, [navigate, afterPick]);
 
   // Fetch the list of tenants on mount
   useEffect(() => {
@@ -53,7 +66,7 @@ const TenantSelection: React.FC = () => {
   // Select a tenant and persist its ID
   const handleSelectTenant = (id: string) => {
     activeTenantStorage.set(id);
-    navigate("/dashboard", { replace: true });
+    navigate(afterPick, { replace: true });
   };
 
   // Handle creating a new tenant (matches backend TenantCreate schema requirements)
@@ -70,12 +83,11 @@ const TenantSelection: React.FC = () => {
         accepted_terms: true, // required by backend
         tier: "sungura", // default; adjust if you add a selector
         notifications_opt_in: true, // optional; keep true for now
-        // referral_code: undefined, // optional
       });
 
       // Persist as active tenant immediately and proceed
       activeTenantStorage.set(tenant.id);
-      navigate("/dashboard", { replace: true });
+      navigate(afterPick, { replace: true });
     } catch (err: any) {
       console.error(err);
       setError(err?.message || "Failed to create tenant");
@@ -84,13 +96,22 @@ const TenantSelection: React.FC = () => {
     }
   };
 
+  const backHref = nextParam ? `/tenant-gate?next=${encodeURIComponent(nextParam)}` : "/tenant-gate";
+
   return (
     <div className="max-w-xl mx-auto py-8 px-4">
-      <h1 className="text-2xl font-bold mb-4">Select your workspace</h1>
+      <div className="flex items-center justify-between mb-4 gap-3">
+        <h1 className="text-2xl font-bold">Select your workspace</h1>
+        <button
+          type="button"
+          onClick={() => navigate(backHref)}
+          className="text-sm text-slate-600 hover:text-slate-900"
+        >
+          Back
+        </button>
+      </div>
 
-      {error ? (
-        <p className="text-red-500 mb-4">{error}</p>
-      ) : null}
+      {error ? <p className="text-red-500 mb-4">{error}</p> : null}
 
       <section className="mb-6">
         <h2 className="text-xl font-semibold mb-2">Your workspaces</h2>

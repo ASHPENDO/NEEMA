@@ -1,17 +1,34 @@
+// frontend/src/pages/Verify.tsx
 import React, { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { PageShell } from "../components/PageShell";
 import { Input } from "../components/Input";
 import { Button } from "../components/Button";
 import { ApiError } from "../lib/api";
 import { normalizeOtp } from "../lib/validators";
-import { useAuth, isProfileComplete } from "../auth/AuthContext";
+import { useAuth } from "../auth/AuthContext";
+
+function safeNext(nextParam: string | null): string {
+  // Only allow internal paths to prevent open redirects
+  if (!nextParam) return "/tenant-gate";
+  if (nextParam.startsWith("/") && !nextParam.startsWith("//")) return nextParam;
+  return "/tenant-gate";
+}
 
 export default function Verify() {
   const nav = useNavigate();
-  const { getPendingEmail, clearPendingEmail, requestCode, verifyCode, me } = useAuth();
+  const [params] = useSearchParams();
+
+  const { getPendingEmail, clearPendingEmail, requestCode, verifyCode } = useAuth();
 
   const pendingEmail = getPendingEmail();
+
+  const nextParam = useMemo(() => {
+    const n = params.get("next");
+    return n && n.trim().length > 0 ? n.trim() : null;
+  }, [params]);
+
+  const nextPath = useMemo(() => safeNext(nextParam), [nextParam]);
 
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
@@ -20,8 +37,7 @@ export default function Verify() {
   const [info, setInfo] = useState<string | null>(null);
 
   const otp = useMemo(() => normalizeOtp(code), [code]);
-  const otpError =
-    code.length === 0 ? undefined : otp.length < 4 ? "Enter the code from your email." : undefined;
+  const otpError = code.length === 0 ? undefined : otp.length < 4 ? "Enter the code from your email." : undefined;
 
   async function onVerify(e: React.FormEvent) {
     e.preventDefault();
@@ -30,7 +46,7 @@ export default function Verify() {
 
     if (!pendingEmail) {
       setServerError("Missing email. Please start again.");
-      nav("/login");
+      nav("/login", { replace: true });
       return;
     }
 
@@ -44,9 +60,8 @@ export default function Verify() {
       await verifyCode(pendingEmail, otp);
       clearPendingEmail();
 
-      // After verifyCode we fetch /me; now route based on profile completion
-      const complete = isProfileComplete(me);
-      nav(complete ? "/dashboard" : "/profile-completion", { replace: true });
+      // Go to next if provided; otherwise funnel to tenant-gate
+      nav(nextPath, { replace: true });
     } catch (err) {
       if (err instanceof ApiError) setServerError(err.message);
       else setServerError("Verification failed. Please try again.");
@@ -61,7 +76,7 @@ export default function Verify() {
 
     if (!pendingEmail) {
       setServerError("Missing email. Please start again.");
-      nav("/login");
+      nav("/login", { replace: true });
       return;
     }
 
@@ -115,7 +130,7 @@ export default function Verify() {
 
         <button
           type="button"
-          onClick={() => nav("/login")}
+          onClick={() => nav(nextParam ? `/login?next=${encodeURIComponent(nextParam)}` : "/login")}
           className="w-full text-sm text-slate-600 hover:text-slate-900"
         >
           Use a different email

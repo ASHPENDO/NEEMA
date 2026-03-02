@@ -1,14 +1,26 @@
-import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
+// frontend/src/pages/TenantCreate.tsx
+import React, { useMemo, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { PageShell } from "../components/PageShell";
 import { Input } from "../components/Input";
 import { Button } from "../components/Button";
-import { ApiError } from "../lib/api";
-import { createTenant } from "../lib/api";
+import { ApiError, createTenant } from "../lib/api";
 import { activeTenantStorage } from "../lib/tenantStorage";
+
+function safeNext(nextParam: string | null): string | null {
+  if (!nextParam) return null;
+  const v = nextParam.trim();
+  if (!v) return null;
+  if (v.startsWith("/") && !v.startsWith("//")) return v;
+  return null;
+}
 
 export default function TenantCreate() {
   const nav = useNavigate();
+  const [params] = useSearchParams();
+
+  const nextParam = useMemo(() => safeNext(params.get("next")), [params]);
+  const afterCreate = useMemo(() => nextParam ?? "/dashboard", [nextParam]);
 
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
@@ -40,7 +52,7 @@ export default function TenantCreate() {
       }
 
       activeTenantStorage.set(created.id);
-      nav("/dashboard", { replace: true });
+      nav(afterCreate, { replace: true });
     } catch (err) {
       if (err instanceof ApiError) setServerError(err.message);
       else setServerError("Could not create tenant. Please try again.");
@@ -48,6 +60,8 @@ export default function TenantCreate() {
       setLoading(false);
     }
   }
+
+  const backHref = nextParam ? `/tenant-gate?next=${encodeURIComponent(nextParam)}` : "/tenant-gate";
 
   return (
     <PageShell title="Create your workspace" subtitle="This will be your business/account workspace in POSTIKA.">
@@ -71,7 +85,7 @@ export default function TenantCreate() {
 
         <button
           type="button"
-          onClick={() => nav("/tenant-gate")}
+          onClick={() => nav(backHref)}
           className="w-full text-sm text-slate-600 hover:text-slate-900"
         >
           Back

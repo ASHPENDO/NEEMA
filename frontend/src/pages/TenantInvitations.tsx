@@ -47,6 +47,8 @@ export default function TenantInvitations() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [permissionDenied, setPermissionDenied] = useState(false);
+
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<TenantRole>("STAFF");
   const [submitting, setSubmitting] = useState(false);
@@ -60,7 +62,6 @@ export default function TenantInvitations() {
     email.length === 0 ? undefined : isValidEmail(emailNorm) ? undefined : "Enter a valid email address.";
 
   useEffect(() => {
-    // Keep tenant context guard (not RBAC)
     if (!tenantId) {
       nav("/tenant-selection", { replace: true });
       return;
@@ -77,9 +78,16 @@ export default function TenantInvitations() {
       const data = await listTenantInvitations();
       const list = Array.isArray(data) ? data : (data as any)?.items;
       setItems(Array.isArray(list) ? list : []);
+      setPermissionDenied(false);
     } catch (e) {
       const err = e as ApiError;
-      setError(err?.message ?? "Failed to load invitations.");
+
+      if (err.status === 403) {
+        setPermissionDenied(true);
+        setError("You don’t have permission to manage invitations.");
+      } else {
+        setError(err?.message ?? "Failed to load invitations.");
+      }
     } finally {
       setLoading(false);
     }
@@ -106,6 +114,7 @@ export default function TenantInvitations() {
       if (err.status === 409) {
         setFormError("This user is already a member of this workspace.");
       } else if (err.status === 403) {
+        setPermissionDenied(true);
         setFormError("You don’t have permission to invite members.");
       } else {
         setFormError(err?.message ?? "Failed to create invitation.");
@@ -126,6 +135,7 @@ export default function TenantInvitations() {
       if (err.status === 409) {
         alert(err?.message ?? "This invitation can’t be resent (accepted/revoked/expired).");
       } else if (err.status === 403) {
+        setPermissionDenied(true);
         alert("You don’t have permission to resend invitations.");
       } else if (err.status === 404) {
         alert("Invitation not found (it may have been revoked).");
@@ -151,6 +161,7 @@ export default function TenantInvitations() {
       if (err.status === 409) {
         alert(err?.message ?? "This invitation can’t be revoked (accepted/revoked/expired).");
       } else if (err.status === 403) {
+        setPermissionDenied(true);
         alert("You don’t have permission to revoke invitations.");
       } else if (err.status === 404) {
         alert("Invitation not found (it may have been revoked).");
@@ -165,12 +176,24 @@ export default function TenantInvitations() {
   return (
     <PageShell title="Tenant Invitations" subtitle="Invite your team members into this tenant.">
       <div className="space-y-6">
+
+        {permissionDenied && (
+          <div className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 p-3 text-yellow-200 text-sm">
+            You don’t have permission to manage invitations in this tenant.
+          </div>
+        )}
+
         {/* Create invitation */}
         <form onSubmit={onCreate} className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
             <div className="md:col-span-2">
               <label className="block text-sm text-white/80 mb-1">Invitee email</label>
-              <Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="team@company.com" />
+              <Input
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="team@company.com"
+                disabled={permissionDenied}
+              />
               {emailError && <p className="text-sm text-red-300 mt-1">{emailError}</p>}
             </div>
 
@@ -179,6 +202,7 @@ export default function TenantInvitations() {
               <select
                 value={role}
                 onChange={(e) => setRole(e.target.value as TenantRole)}
+                disabled={permissionDenied}
                 className="w-full rounded-xl bg-black/20 border border-white/10 px-3 py-2 text-white"
               >
                 {ROLE_OPTIONS.map((r) => (
@@ -193,7 +217,10 @@ export default function TenantInvitations() {
           {formError && <p className="text-sm text-red-300">{formError}</p>}
 
           <div className="flex gap-2">
-            <Button type="submit" disabled={submitting || !!emailError || email.length === 0}>
+            <Button
+              type="submit"
+              disabled={submitting || !!emailError || email.length === 0 || permissionDenied}
+            >
               {submitting ? "Inviting..." : "Send invitation"}
             </Button>
             <Button type="button" variant="secondary" onClick={() => nav("/dashboard")}>
@@ -234,7 +261,7 @@ export default function TenantInvitations() {
                   {items.map((inv) => {
                     const status = computeStatus(inv);
                     const rowBusy = resendingId === inv.id || revokingId === inv.id;
-                    const canActOnThis = status === "pending";
+                    const canActOnThis = status === "pending" && !permissionDenied;
 
                     return (
                       <tr key={inv.id} className="border-b border-white/5">

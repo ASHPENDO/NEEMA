@@ -1,7 +1,9 @@
+// frontend/src/auth/AuthContext.tsx
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "../lib/api";
 import { pendingEmailStorage, tokenStorage } from "../lib/storage";
 import { activeTenantStorage } from "../lib/tenantStorage";
+import { clearTenantMembershipCache } from "../hooks/useTenantMembership";
 import type { AuthTokenResponse, MeResponse, UpdateMeRequest } from "./types";
 
 type AuthState = {
@@ -63,6 +65,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   function logout() {
     tokenStorage.clear();
     activeTenantStorage.clear();
+    clearTenantMembershipCache();
     setToken(null);
     setMe(null);
     // keep pending email optional; many apps keep it for convenience

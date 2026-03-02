@@ -1,12 +1,13 @@
+// frontend/src/pages/AcceptInvitation.tsx
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Button } from "../components/Button";
-import { ApiError } from "../lib/api";
-import { acceptTenantInvitation } from "../lib/api";
+import { ApiError, acceptTenantInvitation } from "../lib/api";
 
 export default function AcceptInvitation() {
   const nav = useNavigate();
+  const loc = useLocation();
   const [params] = useSearchParams();
 
   const token = useMemo(() => {
@@ -37,10 +38,14 @@ export default function AcceptInvitation() {
       const err = e as ApiError;
       setStatus("error");
 
-      // Helpful messaging for common auth cases
       if (err.status === 401) {
-        setError("You need to be logged in to accept this invitation. Please log in, then open this link again.");
-      } else if (err.status === 403) {
+        // Preserve invite link so user can continue after login
+        const next = encodeURIComponent(`${loc.pathname}${loc.search}`);
+        nav(`/login?next=${next}`, { replace: true });
+        return;
+      }
+
+      if (err.status === 403) {
         setError("This invitation cannot be accepted (it may be expired, already used, or not meant for this account).");
       } else {
         setError(err.message ?? "Failed to accept invitation.");
@@ -71,13 +76,9 @@ export default function AcceptInvitation() {
           </p>
 
           <div className="mt-6 rounded-xl bg-slate-50 border border-slate-200 p-4">
-            {status === "loading" && (
-              <p className="text-sm text-slate-700">Accepting invitation…</p>
-            )}
+            {status === "loading" && <p className="text-sm text-slate-700">Accepting invitation…</p>}
 
-            {status === "success" && (
-              <p className="text-sm text-green-700">Invitation accepted. Redirecting…</p>
-            )}
+            {status === "success" && <p className="text-sm text-green-700">Invitation accepted. Redirecting…</p>}
 
             {status === "error" && (
               <div className="space-y-3">
@@ -97,9 +98,7 @@ export default function AcceptInvitation() {
               </div>
             )}
 
-            {status === "idle" && (
-              <p className="text-sm text-slate-700">Ready.</p>
-            )}
+            {status === "idle" && <p className="text-sm text-slate-700">Ready.</p>}
           </div>
 
           <div className="mt-4 text-xs text-slate-500">

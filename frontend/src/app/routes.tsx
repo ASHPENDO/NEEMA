@@ -13,7 +13,7 @@ import TenantInvitations from "../pages/TenantInvitations";
 import ProfileCompletion from "../pages/ProfileCompletion";
 import Dashboard from "../pages/Dashboard";
 
-import TenantRoleGuard from "../components/TenantRoleGuard";
+import RequirePermissions from "../components/RequirePermissions";
 
 export const router = createBrowserRouter([
   { path: "/", element: <Navigate to="/tenant-gate" replace /> },
@@ -25,13 +25,13 @@ export const router = createBrowserRouter([
   { path: "/tenant-gate", element: <TenantGate /> },
   { path: "/tenant-selection", element: <TenantSelection /> },
 
-  // ✅ Members: OWNER/ADMIN only
+  // ✅ Members: permission-gated (hard block + redirect)
   {
     path: "/tenant-members",
     element: (
-      <TenantRoleGuard allow={["OWNER", "ADMIN"]}>
+      <RequirePermissions permissions={["tenant.members.read", "tenant.members.write"]}>
         <TenantMembers />
-      </TenantRoleGuard>
+      </RequirePermissions>
     ),
   },
 
@@ -40,13 +40,13 @@ export const router = createBrowserRouter([
 
   { path: "/tenant-create", element: <TenantCreate /> },
 
-  // ✅ Invitations: OWNER/ADMIN only
+  // ✅ Invitations: permission-gated (hard block + redirect)
   {
     path: "/tenant-invitations",
     element: (
-      <TenantRoleGuard allow={["OWNER", "ADMIN"]}>
+      <RequirePermissions permission="tenant.invites.manage">
         <TenantInvitations />
-      </TenantRoleGuard>
+      </RequirePermissions>
     ),
   },
 

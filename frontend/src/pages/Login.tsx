@@ -1,5 +1,6 @@
+// frontend/src/pages/Login.tsx
 import React, { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { PageShell } from "../components/PageShell";
 import { Input } from "../components/Input";
 import { Button } from "../components/Button";
@@ -9,7 +10,13 @@ import { useAuth } from "../auth/AuthContext";
 
 export default function Login() {
   const nav = useNavigate();
+  const [params] = useSearchParams();
   const { requestCode, setPendingEmail } = useAuth();
+
+  const nextParam = useMemo(() => {
+    const n = params.get("next");
+    return n && n.trim().length > 0 ? n.trim() : null;
+  }, [params]);
 
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
@@ -31,7 +38,9 @@ export default function Login() {
     try {
       await requestCode(emailNorm);
       setPendingEmail(emailNorm);
-      nav("/verify");
+
+      // Preserve next param through verify step
+      nav(nextParam ? `/verify?next=${encodeURIComponent(nextParam)}` : "/verify");
     } catch (err) {
       if (err instanceof ApiError) setServerError(err.message);
       else setServerError("Something went wrong. Please try again.");
@@ -41,10 +50,7 @@ export default function Login() {
   }
 
   return (
-    <PageShell
-      title="Sign in"
-      subtitle="Enter your email and we’ll send a one-time verification code."
-    >
+    <PageShell title="Sign in" subtitle="Enter your email and we’ll send a one-time verification code.">
       {serverError ? (
         <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {serverError}
@@ -66,9 +72,7 @@ export default function Login() {
           Send code
         </Button>
 
-        <div className="text-xs text-slate-500">
-          By continuing, you agree to POSTIKA’s Terms and Privacy Policy.
-        </div>
+        <div className="text-xs text-slate-500">By continuing, you agree to POSTIKA’s Terms and Privacy Policy.</div>
       </form>
     </PageShell>
   );

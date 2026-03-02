@@ -1,7 +1,7 @@
 // frontend/src/hooks/useTenantMembership.ts
 import { useEffect, useState } from "react";
 import { api, ApiError, type TenantRole } from "../lib/api";
-import { activeTenantStorage } from "../lib/tenantStorage";
+import { activeTenantStorage, ACTIVE_TENANT_CHANGED_EVENT } from "../lib/tenantStorage";
 
 /**
  * Authoritative tenant membership type
@@ -23,23 +23,57 @@ export type TenantMembership = {
  */
 const membershipCache = new Map<string, TenantMembership>();
 
+export function clearTenantMembershipCache() {
+  membershipCache.clear();
+}
+
+function getTenantId() {
+  return activeTenantStorage.get();
+}
+
 export function useTenantMembership() {
-  const tenantId = activeTenantStorage.get();
+  const [tenantId, setTenantId] = useState<string | null>(() => getTenantId());
 
-  const [membership, setMembership] = useState<TenantMembership | null>(
-    tenantId ? membershipCache.get(tenantId) ?? null : null
-  );
+  const [membership, setMembership] = useState<TenantMembership | null>(() => {
+    const tid = getTenantId();
+    return tid ? membershipCache.get(tid) ?? null : null;
+  });
 
-  const [loading, setLoading] = useState<boolean>(
-    tenantId ? !membershipCache.has(tenantId) : false
-  );
+  const [loading, setLoading] = useState<boolean>(() => {
+    const tid = getTenantId();
+    return tid ? !membershipCache.has(tid) : false;
+  });
 
   const [error, setError] = useState<string | null>(null);
+
+  // Subscribe to tenant changes:
+  // - Cross-tab: localStorage "storage" event
+  // - Same-tab: ACTIVE_TENANT_CHANGED_EVENT dispatched by tenantStorage.set/clear
+  useEffect(() => {
+    function onStorage(e: StorageEvent) {
+      if (e.key === "postika.activeTenantId") {
+        setTenantId(getTenantId());
+      }
+    }
+
+    function onTenantChanged() {
+      setTenantId(getTenantId());
+    }
+
+    window.addEventListener("storage", onStorage);
+    window.addEventListener(ACTIVE_TENANT_CHANGED_EVENT, onTenantChanged);
+
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener(ACTIVE_TENANT_CHANGED_EVENT, onTenantChanged);
+    };
+  }, []);
 
   useEffect(() => {
     if (!tenantId) {
       setMembership(null);
       setLoading(false);
+      setError(null);
       return;
     }
 
@@ -47,6 +81,7 @@ export function useTenantMembership() {
     if (membershipCache.has(tenantId)) {
       setMembership(membershipCache.get(tenantId)!);
       setLoading(false);
+      setError(null);
       return;
     }
 
@@ -57,10 +92,7 @@ export function useTenantMembership() {
       setError(null);
 
       try {
-        const data = await api<TenantMembership>(
-          "/api/v1/tenants/membership",
-          { method: "GET" }
-        );
+        const data = await api<TenantMembership>("/api/v1/tenants/membership", { method: "GET" });
 
         if (cancelled) return;
 
@@ -91,10 +123,7 @@ export function useTenantMembership() {
     setError(null);
 
     try {
-      const data = await api<TenantMembership>(
-        "/api/v1/tenants/membership",
-        { method: "GET" }
-      );
+      const data = await api<TenantMembership>("/api/v1/tenants/membership", { method: "GET" });
 
       membershipCache.set(tenantId, data);
       setMembership(data);
@@ -106,5 +135,5 @@ export function useTenantMembership() {
     }
   }
 
-  return { membership, loading, error, refresh };
+  return { tenantId, membership, loading, error, refresh };
 }

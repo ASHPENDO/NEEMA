@@ -1,37 +1,65 @@
-import React, { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+// frontend/src/pages/TenantGate.tsx
+import React, { useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { api, ApiError } from "../lib/api";
 import { activeTenantStorage } from "../lib/tenantStorage";
 import { useAuth, isProfileComplete } from "../auth/AuthContext";
 
 type TenantOut = { id: string; name: string; tier: string; is_active: boolean };
 
+function safeInternalPath(p: string | null | undefined): string | null {
+  if (!p) return null;
+  const v = String(p).trim();
+  if (!v) return null;
+  // only allow internal paths
+  if (v.startsWith("/") && !v.startsWith("//")) return v;
+  return null;
+}
+
 export default function TenantGate() {
   const nav = useNavigate();
-  const { isBootstrapping, isAuthed, me } = useAuth();
+  const loc = useLocation();
+  const [params] = useSearchParams();
+
+  const { isBootstrapping, isAuthed, me, logout } = useAuth();
   const [error, setError] = useState<string | null>(null);
+
+  // Intended destination priority:
+  // 1) ?next=/somewhere (explicit)
+  // 2) location.state.from (from RequirePermissions redirects)
+  const intended = useMemo(() => {
+    const nextQ = safeInternalPath(params.get("next"));
+    if (nextQ) return nextQ;
+
+    const fromState = safeInternalPath((loc.state as any)?.from);
+    if (fromState) return fromState;
+
+    return null;
+  }, [params, loc.state]);
 
   useEffect(() => {
     if (isBootstrapping) return;
 
-    // Not logged in -> login
+    // Not logged in -> login (preserve intended route)
     if (!isAuthed) {
-      nav("/login", { replace: true });
+      const next = encodeURIComponent(intended ?? "/tenant-gate");
+      nav(`/login?next=${next}`, { replace: true });
       return;
     }
 
-    // Logged in but profile incomplete -> profile completion
+    // Logged in but profile incomplete -> profile completion (preserve intended route)
     if (!isProfileComplete(me)) {
-      nav("/profile-completion", { replace: true });
+      const next = encodeURIComponent(intended ?? "/tenant-gate");
+      nav(`/profile-completion?next=${next}`, { replace: true });
       return;
     }
 
     (async () => {
       try {
-        // If already have an active tenant, proceed to dashboard
+        // If already have an active tenant, proceed to intended or dashboard
         const existing = activeTenantStorage.get();
         if (existing) {
-          nav("/dashboard", { replace: true });
+          nav(intended ?? "/dashboard", { replace: true });
           return;
         }
 
@@ -41,23 +69,39 @@ export default function TenantGate() {
         });
 
         if (tenants.length === 0) {
-          nav("/tenant-create", { replace: true });
+          // After create tenant, app will set active tenant then route;
+          // we preserve intended by passing next along.
+          const next = intended ? `?next=${encodeURIComponent(intended)}` : "";
+          nav(`/tenant-create${next}`, { replace: true });
           return;
         }
 
         if (tenants.length === 1) {
           activeTenantStorage.set(tenants[0].id);
-          nav("/dashboard", { replace: true });
+          nav(intended ?? "/dashboard", { replace: true });
           return;
         }
 
-        nav("/tenant-selection", { replace: true });
+        // Multiple tenants -> selection page (preserve intended)
+        const next = intended ? `?next=${encodeURIComponent(intended)}` : "";
+        nav(`/tenant-selection${next}`, { replace: true });
       } catch (e) {
-        if (e instanceof ApiError) setError(e.message);
-        else setError("Could not load tenants. Try again.");
+        if (e instanceof ApiError) {
+          // Token expired/invalid (or backend rejected auth)
+          if (e.status === 401 || e.status === 403) {
+            logout();
+            const next = encodeURIComponent(intended ?? "/tenant-gate");
+            nav(`/login?next=${next}`, { replace: true });
+            return;
+          }
+
+          setError(e.message);
+        } else {
+          setError("Could not load tenants. Try again.");
+        }
       }
     })();
-  }, [isBootstrapping, isAuthed, me, nav]);
+  }, [isBootstrapping, isAuthed, me, nav, logout, intended]);
 
   if (error) {
     return (
