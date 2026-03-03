@@ -4,6 +4,8 @@ import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Button } from "../components/Button";
 import { ApiError, acceptTenantInvitation } from "../lib/api";
+import { activeTenantStorage } from "../lib/tenantStorage";
+import { tokenStorage } from "../lib/storage";
 
 export default function AcceptInvitation() {
   const nav = useNavigate();
@@ -14,6 +16,13 @@ export default function AcceptInvitation() {
     const t = params.get("token");
     return t?.trim() || null;
   }, [params]);
+
+  // ✅ Always includes leading "/" and is encoded:
+  // /login?next=%2Faccept-invitation%3Ftoken%3D...
+  const next = useMemo(() => {
+    const path = `${loc.pathname}${loc.search}`;
+    return encodeURIComponent(path.startsWith("/") ? path : `/${path}`);
+  }, [loc.pathname, loc.search]);
 
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
@@ -27,20 +36,26 @@ export default function AcceptInvitation() {
       return;
     }
 
+    // ✅ HARD RULE: if not logged in, go to login immediately (do not wait for a 401)
+    if (!tokenStorage.get()) {
+      nav(`/login?next=${next}`, { replace: true });
+      return;
+    }
+
     setStatus("loading");
     try {
       await acceptTenantInvitation(token);
       setStatus("success");
 
-      // Let TenantGate refresh memberships and route appropriately
+      // Clear stale tenant selection so TenantGate re-evaluates correctly
+      activeTenantStorage.clear();
+
       nav("/tenant-gate", { replace: true });
     } catch (e) {
       const err = e as ApiError;
       setStatus("error");
 
       if (err.status === 401) {
-        // Preserve invite link so user can continue after login
-        const next = encodeURIComponent(`${loc.pathname}${loc.search}`);
         nav(`/login?next=${next}`, { replace: true });
         return;
       }
@@ -54,7 +69,6 @@ export default function AcceptInvitation() {
   }
 
   useEffect(() => {
-    // Auto-run on page load
     void runAccept();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
@@ -71,13 +85,10 @@ export default function AcceptInvitation() {
           <div className="text-xs font-semibold tracking-wide text-slate-500">POSTIKA</div>
           <h1 className="text-2xl font-semibold text-slate-900 mt-1">Accept Invitation</h1>
 
-          <p className="text-sm text-slate-600 mt-2">
-            We’re confirming your invitation and adding you to the tenant.
-          </p>
+          <p className="text-sm text-slate-600 mt-2">We’re confirming your invitation and adding you to the tenant.</p>
 
           <div className="mt-6 rounded-xl bg-slate-50 border border-slate-200 p-4">
             {status === "loading" && <p className="text-sm text-slate-700">Accepting invitation…</p>}
-
             {status === "success" && <p className="text-sm text-green-700">Invitation accepted. Redirecting…</p>}
 
             {status === "error" && (
@@ -87,11 +98,11 @@ export default function AcceptInvitation() {
                 <div className="flex flex-wrap gap-2">
                   <Button onClick={runAccept}>Try again</Button>
 
-                  <Button variant="secondary" onClick={() => nav("/login")}>
+                  <Button variant="secondary" onClick={() => nav(`/login?next=${next}`, { replace: true })}>
                     Go to login
                   </Button>
 
-                  <Button variant="secondary" onClick={() => nav("/tenant-gate")}>
+                  <Button variant="secondary" onClick={() => nav("/tenant-gate", { replace: true })}>
                     Go to Tenant Gate
                   </Button>
                 </div>
@@ -101,9 +112,7 @@ export default function AcceptInvitation() {
             {status === "idle" && <p className="text-sm text-slate-700">Ready.</p>}
           </div>
 
-          <div className="mt-4 text-xs text-slate-500">
-            Tip: if you were logged out, log in first, then reopen the invitation link.
-          </div>
+          <div className="mt-4 text-xs text-slate-500">Tip: if you were logged out, log in first, then reopen the invitation link.</div>
         </motion.div>
       </div>
     </div>

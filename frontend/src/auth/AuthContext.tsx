@@ -26,18 +26,11 @@ type AuthContextValue = AuthState & {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-/**
- * Normalize /auth/me payload for backward compatibility.
- * Backend canonical fields: full_name, phone_e164, profile_complete
- * Older UI fields: name, phone_number, is_profile_complete
- */
 function normalizeMe(data: any): MeResponse {
   return {
     ...data,
-    // Provide aliases so older UI code keeps working
     name: data?.name ?? data?.full_name ?? null,
     phone_number: data?.phone_number ?? data?.phone_e164 ?? null,
-    // Keep legacy boolean in sync if present in types/UI
     is_profile_complete:
       typeof data?.is_profile_complete === "boolean"
         ? data.is_profile_complete
@@ -62,13 +55,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setMe(normalizeMe(data));
   }
 
+  // 🔴 HARDENED LOGOUT
   function logout() {
-    tokenStorage.clear();
-    activeTenantStorage.clear();
-    clearTenantMembershipCache();
-    setToken(null);
-    setMe(null);
-    // keep pending email optional; many apps keep it for convenience
+    try {
+      // Clear all storages
+      tokenStorage.clear();
+      pendingEmailStorage.clear();
+      activeTenantStorage.clear();
+      clearTenantMembershipCache();
+
+      // Reset in-memory state
+      setToken(null);
+      setMe(null);
+    } finally {
+      // Hard navigation ensures full SPA reset (prevents ghost auth state)
+      window.location.assign("/login");
+    }
   }
 
   async function requestCode(email: string) {
@@ -92,7 +94,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     tokenStorage.set(accessToken);
     setToken(accessToken);
 
-    // Immediately hydrate /me
     await refreshMe();
   }
 
@@ -115,7 +116,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     pendingEmailStorage.clear();
   }
 
-  // Bootstrap once on app start: if token exists, fetch /me; if 401/403, logout.
   useEffect(() => {
     if (bootstrappedRef.current) return;
     bootstrappedRef.current = true;
@@ -126,7 +126,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           await refreshMe();
         }
       } catch (e) {
-        // If token is invalid/expired, clear it.
         if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
           logout();
         } else {
@@ -136,7 +135,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setIsBootstrapping(false);
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const value: AuthContextValue = useMemo(
@@ -166,18 +164,14 @@ export function useAuth() {
   return ctx;
 }
 
-// Helper: profile completeness (use backend truth; robust across schema changes)
 export function isProfileComplete(me: MeResponse | null) {
   if (!me) return false;
 
-  // Prefer canonical backend flag
   const canonical = (me as any).profile_complete;
   if (typeof canonical === "boolean") return canonical;
 
-  // Back-compat legacy flag
   if ((me as any).is_profile_complete === true) return true;
 
-  // Last-resort fallback (older UI fields)
   const nameOk = !!((me as any).name && String((me as any).name).trim().length >= 2);
   const phoneOk = !!((me as any).phone_number && String((me as any).phone_number).trim().length >= 8);
   return nameOk && phoneOk;

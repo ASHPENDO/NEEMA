@@ -39,8 +39,8 @@ export default function Login() {
       await requestCode(emailNorm);
       setPendingEmail(emailNorm);
 
-      // Preserve next param through verify step
-      nav(nextParam ? `/verify?next=${encodeURIComponent(nextParam)}` : "/verify");
+      // Preserve next param through verify step (nextParam is already encoded from /login?next=...)
+      nav(nextParam ? `/verify?next=${nextParam}` : "/verify");
     } catch (err) {
       if (err instanceof ApiError) setServerError(err.message);
       else setServerError("Something went wrong. Please try again.");
@@ -52,9 +52,7 @@ export default function Login() {
   return (
     <PageShell title="Sign in" subtitle="Enter your email and we’ll send a one-time verification code.">
       {serverError ? (
-        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-          {serverError}
-        </div>
+        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{serverError}</div>
       ) : null}
 
       <form onSubmit={onSubmit} className="space-y-4">

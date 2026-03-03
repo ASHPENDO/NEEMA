@@ -28,7 +28,11 @@ export default function Verify() {
     return n && n.trim().length > 0 ? n.trim() : null;
   }, [params]);
 
-  const nextPath = useMemo(() => safeNext(nextParam), [nextParam]);
+  const nextPath = useMemo(() => {
+    // decode once so "/accept-invitation?token=..." is a real path again
+    const decoded = nextParam ? decodeURIComponent(nextParam) : null;
+    return safeNext(decoded);
+  }, [nextParam]);
 
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
@@ -93,20 +97,13 @@ export default function Verify() {
   }
 
   return (
-    <PageShell
-      title="Verify code"
-      subtitle={pendingEmail ? `Enter the code sent to ${pendingEmail}.` : "Enter the code from your email."}
-    >
+    <PageShell title="Verify code" subtitle={pendingEmail ? `Enter the code sent to ${pendingEmail}.` : "Enter the code from your email."}>
       {serverError ? (
-        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-          {serverError}
-        </div>
+        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{serverError}</div>
       ) : null}
 
       {info ? (
-        <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-          {info}
-        </div>
+        <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">{info}</div>
       ) : null}
 
       <form onSubmit={onVerify} className="space-y-4">
@@ -130,7 +127,7 @@ export default function Verify() {
 
         <button
           type="button"
-          onClick={() => nav(nextParam ? `/login?next=${encodeURIComponent(nextParam)}` : "/login")}
+          onClick={() => nav(nextParam ? `/login?next=${nextParam}` : "/login")}
           className="w-full text-sm text-slate-600 hover:text-slate-900"
         >
           Use a different email

@@ -56,17 +56,27 @@ export default function TenantGate() {
 
     (async () => {
       try {
-        // If already have an active tenant, proceed to intended or dashboard
-        const existing = activeTenantStorage.get();
-        if (existing) {
-          nav(intended ?? "/dashboard", { replace: true });
-          return;
-        }
-
+        // Always load tenants to validate/repair activeTenantId
         const tenants = await api<TenantOut[]>("/api/v1/tenants", {
           method: "GET",
           auth: true,
         });
+
+        const existing = activeTenantStorage.get();
+
+        // If we have an active tenant but user is not actually in that tenant list, clear it.
+        if (existing && !tenants.some((t) => t.id === existing)) {
+          activeTenantStorage.clear();
+        }
+
+        // Re-read after potential clear
+        const active = activeTenantStorage.get();
+
+        // If already have a valid active tenant, proceed to intended or dashboard
+        if (active) {
+          nav(intended ?? "/dashboard", { replace: true });
+          return;
+        }
 
         if (tenants.length === 0) {
           // After create tenant, app will set active tenant then route;

@@ -50,7 +50,7 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
     ...(opts.headers ?? {}),
   };
 
-  // Inject bearer token from tokenStorage when auth is enabled.
+  // Inject bearer token from tokenStorage when auth is enabled (PER REQUEST)
   if (auth) {
     const token = tokenStorage.get();
     if (token) headers.Authorization = `Bearer ${token}`;
@@ -130,13 +130,13 @@ export const getMyTenantMembership = async <T = any>(): Promise<T> => {
 
 /*
  * ============================================================================
- * Tenant Invitations (tenant-scoped) — uses X-Tenant-Id header automatically
- * Swagger paths:
- *   GET  /api/v1/tenants/invitations
- *   POST /api/v1/tenants/invitations
- *   POST /api/v1/tenants/invitations/accept
- *   POST /api/v1/tenants/invitations/{invite_id}/revoke
- *   POST /api/v1/tenants/invitations/{invite_id}/resend
+ * Tenant Invitations
+ * NOTE:
+ * Your backend accept handler is defined as: @router.post("/accept")
+ * and the router is included in app.main with prefix "/api/v1".
+ *
+ * Based on your observed 404 at /api/v1/tenants/invitations/accept,
+ * the router is mounted under /api/v1/tenant-invitations (hyphenated).
  * ============================================================================
  */
 
@@ -192,9 +192,10 @@ export const resendTenantInvitation = async (inviteId: string): Promise<void> =>
   await post(`/api/v1/tenants/invitations/${inviteId}/resend`);
 };
 
-// Accept invitation (token-based)
+// ✅ Accept invitation (token-based) — FIXED PATH + sends accept_tos
+// ✅ Accept invitation (token-based) — correct router mount is underscore
 export const acceptTenantInvitation = async (token: string): Promise<void> => {
-  await post(`/api/v1/tenants/invitations/accept`, { token });
+  await post(`/api/v1/tenant-invitations/accept`, { token, accept_tos: true });
 };
 
 /*
@@ -237,7 +238,6 @@ export async function updateTenantMember(
 }
 
 // Back-compat alias: older code may import getTenantMembers.
-// Now that /members is implemented, point it to the real members list.
 export const getTenantMembers = async <T = TenantMember[]>(): Promise<T> => {
   return (await listTenantMembers()) as unknown as T;
 };
