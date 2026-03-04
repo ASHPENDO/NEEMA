@@ -32,9 +32,13 @@ export type RequestOptions = {
   signal?: AbortSignal;
 };
 
-// OPTION B FIX: default to backend in dev so calls never go to :5173.
-// You can still override via VITE_API_BASE_URL in .env (recommended).
-const BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000").replace(/\/+$/, "");
+// IMPORTANT: avoid localhost to prevent IPv6/hosts mismatch on some machines.
+// If VITE_API_BASE_URL is not set, fall back to 127.0.0.1:8000.
+const DEFAULT_DEV_BASE = "http://127.0.0.1:8000";
+const rawBase = import.meta.env.VITE_API_BASE_URL ?? DEFAULT_DEV_BASE;
+const BASE_URL = String(rawBase).replace(/\/+$/, "");
+
+console.log("[API] BASE_URL =", BASE_URL);
 
 const client = axios.create({
   baseURL: BASE_URL,
@@ -63,7 +67,7 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
     headers["X-Tenant-Id"] = tenantId;
   }
 
-  // Build full URL ensuring a leading slash.
+  // Ensure leading slash
   const url = path.startsWith("/") ? path : `/${path}`;
 
   try {
@@ -86,9 +90,7 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
       response?.statusText ||
       "Request failed";
 
-    if (typeof message !== "string") {
-      message = "Request failed";
-    }
+    if (typeof message !== "string") message = "Request failed";
 
     throw new ApiError({ status, message, details: payload });
   }
@@ -131,12 +133,8 @@ export const getMyTenantMembership = async <T = any>(): Promise<T> => {
 /*
  * ============================================================================
  * Tenant Invitations
- * NOTE:
- * Your backend accept handler is defined as: @router.post("/accept")
- * and the router is included in app.main with prefix "/api/v1".
- *
- * Based on your observed 404 at /api/v1/tenants/invitations/accept,
- * the router is mounted under /api/v1/tenant-invitations (hyphenated).
+ * Backend OpenAPI confirms:
+ *   POST /api/v1/tenant-invitations/accept
  * ============================================================================
  */
 
@@ -192,8 +190,7 @@ export const resendTenantInvitation = async (inviteId: string): Promise<void> =>
   await post(`/api/v1/tenants/invitations/${inviteId}/resend`);
 };
 
-// ✅ Accept invitation (token-based) — FIXED PATH + sends accept_tos
-// ✅ Accept invitation (token-based) — correct router mount is underscore
+// Accept invitation (token-based) — CORRECT PATH + sends accept_tos
 export const acceptTenantInvitation = async (token: string): Promise<void> => {
   await post(`/api/v1/tenant-invitations/accept`, { token, accept_tos: true });
 };

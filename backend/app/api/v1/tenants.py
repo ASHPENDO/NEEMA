@@ -26,6 +26,7 @@ from app.db.session import get_db
 from app.models.salesperson_earning_event import SalespersonEarningEvent
 from app.models.tenant import Tenant
 from app.models.tenant_membership import TenantMembership
+from app.models.tenant_invitation import TenantInvitation  # ADDED
 from app.models.user import User
 from app.schemas.tenant import TenantCreate, TenantOut
 from app.schemas.tenant_membership import TenantMemberOut, TenantMemberUpdate
@@ -53,6 +54,26 @@ async def create_tenant(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="accepted_terms must be true to create a tenant",
+        )
+
+    # BLOCK: If this user has any unexpired tenant invitation, they must accept it first.
+    # This prevents invited workers (ADMIN/MANAGER/STAFF) from creating new tenants
+    # simply because they have zero memberships before acceptance.
+    pending_inv_stmt = (
+        select(func.count())
+        .select_from(TenantInvitation)
+        .where(TenantInvitation.email == user.email)
+        .where(TenantInvitation.expires_at > utcnow())
+        .where(TenantInvitation.accepted_at.is_(None))
+    )
+    pending_inv_count = int((await db.execute(pending_inv_stmt)).scalar_one())
+    if pending_inv_count > 0:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "pending_invitation_exists",
+                "message": "You have a pending invitation. Please accept it before creating a tenant.",
+            },
         )
 
     owned_stmt = (
