@@ -176,7 +176,6 @@ export default function TenantInvitations() {
   return (
     <PageShell title="Tenant Invitations" subtitle="Invite your team members into this tenant.">
       <div className="space-y-6">
-
         {permissionDenied && (
           <div className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 p-3 text-yellow-200 text-sm">
             You don’t have permission to manage invitations in this tenant.
@@ -217,10 +216,7 @@ export default function TenantInvitations() {
           {formError && <p className="text-sm text-red-300">{formError}</p>}
 
           <div className="flex gap-2">
-            <Button
-              type="submit"
-              disabled={submitting || !!emailError || email.length === 0 || permissionDenied}
-            >
+            <Button type="submit" disabled={submitting || !!emailError || email.length === 0 || permissionDenied}>
               {submitting ? "Inviting..." : "Send invitation"}
             </Button>
             <Button type="button" variant="secondary" onClick={() => nav("/dashboard")}>
@@ -261,7 +257,9 @@ export default function TenantInvitations() {
                   {items.map((inv) => {
                     const status = computeStatus(inv);
                     const rowBusy = resendingId === inv.id || revokingId === inv.id;
-                    const canActOnThis = status === "pending" && !permissionDenied;
+
+                    // ✅ NEW: only show actions for pending invites; hide for accepted/expired/etc.
+                    const showActions = status === "pending" && !permissionDenied;
 
                     return (
                       <tr key={inv.id} className="border-b border-white/5">
@@ -271,24 +269,28 @@ export default function TenantInvitations() {
                         <td className="py-2 pr-3">{formatDate(inv.expires_at)}</td>
                         <td className="py-2 pr-3">{formatDate(inv.created_at)}</td>
                         <td className="py-2 text-right">
-                          <div className="inline-flex gap-2">
-                            <Button
-                              type="button"
-                              variant="secondary"
-                              disabled={rowBusy || !canActOnThis}
-                              onClick={() => onResend(inv.id)}
-                            >
-                              {resendingId === inv.id ? "Resending..." : "Resend"}
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="danger"
-                              disabled={rowBusy || !canActOnThis}
-                              onClick={() => onRevoke(inv.id)}
-                            >
-                              {revokingId === inv.id ? "Revoking..." : "Revoke"}
-                            </Button>
-                          </div>
+                          {showActions ? (
+                            <div className="inline-flex gap-2">
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                disabled={rowBusy}
+                                onClick={() => onResend(inv.id)}
+                              >
+                                {resendingId === inv.id ? "Resending..." : "Resend"}
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="danger"
+                                disabled={rowBusy}
+                                onClick={() => onRevoke(inv.id)}
+                              >
+                                {revokingId === inv.id ? "Revoking..." : "Revoke"}
+                              </Button>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-white/50">—</span>
+                          )}
                         </td>
                       </tr>
                     );

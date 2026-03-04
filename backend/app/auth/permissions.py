@@ -105,6 +105,9 @@ ALL_PERMISSIONS: FrozenSet[str] = frozenset(p.value for p in Permission)
 # and NO billing/security/member-management.
 STAFF_MARKETING_EXECUTION: FrozenSet[str] = frozenset(
     {
+        # ✅ Members:read is allowed to ALL roles (visibility)
+        Permission.MEMBERS_READ.value,
+
         # Catalog
         Permission.CATALOG_READ.value,
         Permission.CATALOG_CREATE.value,
@@ -168,14 +171,12 @@ MANAGER_EXTRA: FrozenSet[str] = frozenset(
     }
 )
 
-# ADMIN: operational admin (team + governance).
-# Explicitly blocked from billing/security by enforcement; can delete marketing objects.
+# ADMIN: operational admin.
+# IMPORTANT: As per policy, ADMIN/MANAGER/STAFF must NOT be able to invite members.
+# Member invites + role changes + deactivation remain OWNER-only governance.
 ADMIN_EXTRA: FrozenSet[str] = frozenset(
     {
         Permission.MEMBERS_READ.value,
-        Permission.MEMBERS_INVITE.value,
-        Permission.MEMBERS_UPDATE_ROLE.value,
-        Permission.MEMBERS_DEACTIVATE.value,
         Permission.AUDIT_LOGS_READ.value,
     }
 )
@@ -231,21 +232,18 @@ SENSITIVE_PERMISSIONS: FrozenSet[str] = frozenset(
         Permission.BILLING_MANAGE.value,
         Permission.SECURITY_READ.value,
         Permission.SECURITY_MANAGE.value,
+        # Governance (OWNER-only)
+        Permission.MEMBERS_INVITE.value,
+        Permission.MEMBERS_UPDATE_ROLE.value,
+        Permission.MEMBERS_DEACTIVATE.value,
     }
 )
 
 # -------------------------------------------------------------------
 # Backwards-compatible PERM shim (legacy PERM.TENANT_* constants)
 # -------------------------------------------------------------------
-# Older modules still reference:
-#   PERM.TENANT_WRITE
-#   PERM.TENANT_MEMBERS_READ
-#   PERM.TENANT_MEMBERS_WRITE
-#   PERM.TENANT_INVITES_MANAGE
-#
-# We map these to the new permission taxonomy.
-
 class _LegacyPERM:
+    # NOTE: Previously this pointed to invite; keep it but understand it is OWNER-only now.
     TENANT_WRITE = Permission.MEMBERS_INVITE.value
 
     TENANT_MEMBERS_READ = Permission.MEMBERS_READ.value

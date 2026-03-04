@@ -25,11 +25,11 @@ export const router = createBrowserRouter([
   { path: "/tenant-gate", element: <TenantGate /> },
   { path: "/tenant-selection", element: <TenantSelection /> },
 
-  // ✅ Members: permission-gated (hard block + redirect)
+  // ✅ Members: permission-gated (read-only allowed for STAFF)
   {
     path: "/tenant-members",
     element: (
-      <RequirePermissions permissions={["tenant.members.read", "tenant.members.write"]}>
+      <RequirePermissions permission="members:read">
         <TenantMembers />
       </RequirePermissions>
     ),
@@ -40,11 +40,11 @@ export const router = createBrowserRouter([
 
   { path: "/tenant-create", element: <TenantCreate /> },
 
-  // ✅ Invitations: permission-gated (hard block + redirect)
+  // ✅ Invitations: permission-gated (OWNER only in your current policy)
   {
     path: "/tenant-invitations",
     element: (
-      <RequirePermissions permission="tenant.invites.manage">
+      <RequirePermissions permission="members:invite">
         <TenantInvitations />
       </RequirePermissions>
     ),

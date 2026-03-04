@@ -12,12 +12,15 @@ export default function Dashboard() {
   const nav = useNavigate();
 
   const tenantId = useMemo(() => activeTenantStorage.get(), []);
-  const { membership, error: memError, can, canAny } = useAccess();
+  const { membership, error: memError, can } = useAccess();
 
   const role = membership?.role ?? null;
 
-  const canSeeMembers = canAny(["tenant.members.read", "tenant.members.write"]);
-  const canSeeInvites = can("tenant.invites.manage");
+  // Members button should be visible to ALL (UX), enforcement handled by route guard/backend
+  const canSeeMembers = Boolean(tenantId);
+
+  // Invitations should be OWNER-only
+  const canSeeInvites = can("members:invite");
 
   const showAdminTools = Boolean(tenantId) && (canSeeMembers || canSeeInvites);
 
@@ -53,7 +56,7 @@ export default function Dashboard() {
             </div>
 
             <div className="flex gap-2">
-              {canSeeMembers && <Button onClick={() => nav("/tenant-members")}>Members</Button>}
+              {tenantId && <Button onClick={() => nav("/tenant-members")}>Members</Button>}
               {canSeeInvites && <Button onClick={() => nav("/tenant-invitations")}>Invitations</Button>}
 
               <Button variant="secondary" onClick={logout}>

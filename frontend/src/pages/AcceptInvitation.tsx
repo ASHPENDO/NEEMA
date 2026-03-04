@@ -7,22 +7,9 @@ import { ApiError, acceptTenantInvitation } from "../lib/api";
 import { activeTenantStorage } from "../lib/tenantStorage";
 import { tokenStorage } from "../lib/storage";
 
-const PENDING_INVITE_TOKEN_KEY = "postika.pendingInviteToken";
-
-function setPendingInviteToken(token: string) {
-  try {
-    sessionStorage.setItem(PENDING_INVITE_TOKEN_KEY, token);
-  } catch {
-    // ignore
-  }
-}
-
-function clearPendingInviteToken() {
-  try {
-    sessionStorage.removeItem(PENDING_INVITE_TOKEN_KEY);
-  } catch {
-    // ignore
-  }
+function getDetail(e: unknown): any {
+  if (e && typeof e === "object" && "detail" in (e as any)) return (e as any).detail;
+  return undefined;
 }
 
 export default function AcceptInvitation() {
@@ -42,9 +29,7 @@ export default function AcceptInvitation() {
     return encodeURIComponent(path.startsWith("/") ? path : `/${path}`);
   }, [loc.pathname, loc.search]);
 
-  const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">(
-    "idle"
-  );
+  const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
 
   async function runAccept() {
@@ -52,13 +37,9 @@ export default function AcceptInvitation() {
 
     if (!token) {
       setStatus("error");
-      clearPendingInviteToken();
       setError("Missing invitation token. Please open the full link from your email.");
       return;
     }
-
-    // Persist token immediately so TenantGate can force the accept flow after login.
-    setPendingInviteToken(token);
 
     // ✅ HARD RULE: if not logged in, go to login immediately (do not wait for a 401)
     if (!tokenStorage.get()) {
@@ -74,45 +55,65 @@ export default function AcceptInvitation() {
       // Clear stale tenant selection so TenantGate re-evaluates correctly
       activeTenantStorage.clear();
 
-      // Clear the pending invite token to avoid redirect loops
-      clearPendingInviteToken();
-
       nav("/tenant-gate", { replace: true });
     } catch (e) {
       const err = e as ApiError;
       setStatus("error");
 
+      // If auth expired/invalid, bounce to login preserving return path
       if (err.status === 401) {
-        // Keep pending token; user needs to re-auth then accept.
         nav(`/login?next=${next}`, { replace: true });
         return;
       }
 
-      // If token is invalid/expired/used, clear stored pending token so user isn't stuck.
-      if (err.status === 404 || err.status === 400 || err.status === 410 || err.status === 409) {
-        clearPendingInviteToken();
+      // ✅ 409: already accepted (backend: "Invitation already accepted")
+      if (err.status === 409) {
+        setError("Invitation already accepted. Continue to Tenant Gate.");
+        return;
       }
 
+      const detail = getDetail(err);
+
+      // ✅ 400: expired (backend: "Invitation expired" / "token is required" / etc.)
+      if (err.status === 400) {
+        const msg = typeof detail === "string" ? detail : err.message;
+        if (String(msg).toLowerCase().includes("expired")) {
+          setError("This invitation has expired. Ask the admin to resend a new invitation link.");
+          return;
+        }
+        setError(msg ?? "Failed to accept invitation.");
+        return;
+      }
+
+      // ✅ 403: email mismatch / not allowed
       if (err.status === 403) {
-        // Also clear to prevent loops if backend says it's not acceptable for this account.
-        clearPendingInviteToken();
+        // backend returns:
+        // { error: "INVITE_EMAIL_MISMATCH", message, invited_email, current_email }
+        if (detail && typeof detail === "object" && detail.error === "INVITE_EMAIL_MISMATCH") {
+          const invited = detail.invited_email ? String(detail.invited_email) : null;
+          const current = detail.current_email ? String(detail.current_email) : null;
+
+          if (invited && current) {
+            setError(
+              `This invitation is for ${invited}, but you are signed in as ${current}. Please log out and sign in with ${invited}, then reopen the invitation link.`
+            );
+            return;
+          }
+        }
+
         setError(
           "This invitation cannot be accepted (it may be expired, already used, or not meant for this account)."
         );
         return;
       }
 
-      // Prefer FastAPI detail if present
-      const detail =
-        (err as any)?.body?.detail ??
-        (err as any)?.data?.detail ??
-        (err as any)?.detail;
+      // 404: invalid token
+      if (err.status === 404) {
+        setError("Invalid invitation token. Please open the full link from your email, or ask the admin to resend it.");
+        return;
+      }
 
-      setError(
-        (typeof detail === "string" ? detail : null) ??
-          err.message ??
-          "Failed to accept invitation."
-      );
+      setError(err.message ?? "Failed to accept invitation.");
     }
   }
 
@@ -133,17 +134,11 @@ export default function AcceptInvitation() {
           <div className="text-xs font-semibold tracking-wide text-slate-500">POSTIKA</div>
           <h1 className="text-2xl font-semibold text-slate-900 mt-1">Accept Invitation</h1>
 
-          <p className="text-sm text-slate-600 mt-2">
-            We’re confirming your invitation and adding you to the tenant.
-          </p>
+          <p className="text-sm text-slate-600 mt-2">We’re confirming your invitation and adding you to the tenant.</p>
 
           <div className="mt-6 rounded-xl bg-slate-50 border border-slate-200 p-4">
-            {status === "loading" && (
-              <p className="text-sm text-slate-700">Accepting invitation…</p>
-            )}
-            {status === "success" && (
-              <p className="text-sm text-green-700">Invitation accepted. Redirecting…</p>
-            )}
+            {status === "loading" && <p className="text-sm text-slate-700">Accepting invitation…</p>}
+            {status === "success" && <p className="text-sm text-green-700">Invitation accepted. Redirecting…</p>}
 
             {status === "error" && (
               <div className="space-y-3">
@@ -152,17 +147,11 @@ export default function AcceptInvitation() {
                 <div className="flex flex-wrap gap-2">
                   <Button onClick={runAccept}>Try again</Button>
 
-                  <Button
-                    variant="secondary"
-                    onClick={() => nav(`/login?next=${next}`, { replace: true })}
-                  >
+                  <Button variant="secondary" onClick={() => nav(`/login?next=${next}`, { replace: true })}>
                     Go to login
                   </Button>
 
-                  <Button
-                    variant="secondary"
-                    onClick={() => nav("/tenant-gate", { replace: true })}
-                  >
+                  <Button variant="secondary" onClick={() => nav("/tenant-gate", { replace: true })}>
                     Go to Tenant Gate
                   </Button>
                 </div>

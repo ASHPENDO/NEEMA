@@ -25,9 +25,12 @@ export default function TenantMembers() {
   const nav = useNavigate();
   const tenantId = useMemo(() => activeTenantStorage.get(), []);
 
-  const { can, canAny } = useAccess();
-  const canReadMembers = canAny(["tenant.members.read", "tenant.members.write"]);
-  const canWriteMembers = can("tenant.members.write");
+  const { can } = useAccess();
+
+  // ✅ Align with backend permissions (members:read, members:update_role, members:deactivate)
+  const canReadMembers = can("members:read");
+  const canUpdateRole = can("members:update_role");
+  const canDeactivate = can("members:deactivate");
 
   const [items, setItems] = useState<TenantMember[]>([]);
   const [loading, setLoading] = useState(true);
@@ -48,7 +51,7 @@ export default function TenantMembers() {
       setLoading(true);
       setError(null);
 
-      // UI gating: if you can’t even read, don’t try (but still allow backend truth if you prefer)
+      // UI gating: if you can’t even read, don’t try
       if (!canReadMembers) {
         setPermissionDenied(true);
         setItems([]);
@@ -126,7 +129,8 @@ export default function TenantMembers() {
   }
 
   async function onChangeRole(member: TenantMember, nextRole: TenantRole) {
-    if (!canWriteMembers) {
+    // ✅ Only allow role changes if you have members:update_role
+    if (!canUpdateRole) {
       setPermissionDenied(true);
       alert("Forbidden: you don’t have permission to change roles.");
       return;
@@ -155,7 +159,8 @@ export default function TenantMembers() {
   }
 
   async function onToggleActive(member: TenantMember, nextActive: boolean) {
-    if (!canWriteMembers) {
+    // ✅ Only allow deactivate/reactivate if you have members:deactivate
+    if (!canDeactivate) {
       setPermissionDenied(true);
       alert("Forbidden: you don’t have permission to manage members.");
       return;
@@ -186,7 +191,8 @@ export default function TenantMembers() {
     }
   }
 
-  const readOnly = canReadMembers && !canWriteMembers;
+  // ✅ Read-only if you can read but can't do any writes
+  const readOnly = canReadMembers && !canUpdateRole && !canDeactivate;
 
   return (
     <PageShell title="Tenant Members" subtitle="Manage who can access this tenant.">
@@ -243,38 +249,55 @@ export default function TenantMembers() {
                 <tbody className="text-white/90">
                   {items.map((m) => {
                     const busy = rowBusyId === m.user_id;
-                    const disableWrites = busy || readOnly || permissionDenied;
+
+                    // ✅ Role edits only if members:update_role
+                    const roleEditable = canUpdateRole && !permissionDenied;
+                    const disableRole = busy || !roleEditable;
+
+                    // ✅ Activate/deactivate only if members:deactivate
+                    const canToggle = canDeactivate && !permissionDenied;
+                    const disableToggle = busy || !canToggle;
 
                     return (
                       <tr key={m.user_id} className="border-b border-white/5">
                         <td className="py-2 pr-3">{m.email}</td>
 
                         <td className="py-2 pr-3">
-                          <select
-                            value={m.role}
-                            disabled={disableWrites}
-                            onChange={(e) => onChangeRole(m, e.target.value as TenantRole)}
-                            className="rounded-xl bg-black/20 border border-white/10 px-3 py-2 text-white"
-                          >
-                            {ROLE_OPTIONS.map((r) => (
-                              <option key={r} value={r} className="bg-black">
-                                {r}
-                              </option>
-                            ))}
-                          </select>
+                          {roleEditable ? (
+                            <select
+                              value={m.role}
+                              disabled={disableRole}
+                              onChange={(e) => onChangeRole(m, e.target.value as TenantRole)}
+                              className="rounded-xl bg-black/20 border border-white/10 px-3 py-2 text-white"
+                            >
+                              {ROLE_OPTIONS.map((r) => (
+                                <option key={r} value={r} className="bg-black">
+                                  {r}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <span className="inline-flex rounded-xl bg-black/20 border border-white/10 px-3 py-2">
+                              {m.role}
+                            </span>
+                          )}
                         </td>
 
                         <td className="py-2 pr-3">{m.is_active ? "Yes" : "No"}</td>
                         <td className="py-2 pr-3">{formatDate(m.created_at)}</td>
 
                         <td className="py-2 text-right">
-                          <Button
-                            variant={m.is_active ? "danger" : "secondary"}
-                            disabled={disableWrites}
-                            onClick={() => onToggleActive(m, !m.is_active)}
-                          >
-                            {busy ? "Saving..." : m.is_active ? "Deactivate" : "Reactivate"}
-                          </Button>
+                          {canDeactivate ? (
+                            <Button
+                              variant={m.is_active ? "danger" : "secondary"}
+                              disabled={disableToggle}
+                              onClick={() => onToggleActive(m, !m.is_active)}
+                            >
+                              {busy ? "Saving..." : m.is_active ? "Deactivate" : "Reactivate"}
+                            </Button>
+                          ) : (
+                            <span className="text-xs text-white/50">—</span>
+                          )}
                         </td>
                       </tr>
                     );

@@ -1,15 +1,26 @@
 // frontend/src/pages/ProfileCompletion.tsx
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { PageShell } from "../components/PageShell";
 import { Input } from "../components/Input";
 import { Button } from "../components/Button";
 import { ApiError } from "../lib/api";
 import { useAuth, isProfileComplete } from "../auth/AuthContext";
 
+function safeInternalPath(p: string | null | undefined): string | null {
+  if (!p) return null;
+  const v = String(p).trim();
+  if (!v) return null;
+  if (v.startsWith("/") && !v.startsWith("//")) return v;
+  return null;
+}
+
 export default function ProfileCompletion() {
   const nav = useNavigate();
+  const [params] = useSearchParams();
   const { me, updateMe } = useAuth();
+
+  const next = useMemo(() => safeInternalPath(params.get("next")), [params]);
 
   // Backend expects: full_name, phone_e164, country (optional)
   // Note: me currently may not have full_name/phone_e164 yet; keep safe fallbacks.
@@ -37,9 +48,9 @@ export default function ProfileCompletion() {
   // If already complete, avoid trapping user (navigate via effect, not during render)
   useEffect(() => {
     if (isProfileComplete(me)) {
-      nav("/tenant-gate", { replace: true });
+      nav(next ?? "/tenant-gate", { replace: true });
     }
-  }, [me, nav]);
+  }, [me, nav, next]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -61,8 +72,8 @@ export default function ProfileCompletion() {
       // Clear optional password field (since it's not persisted yet)
       setPassword("");
 
-      // Funnel through TenantGate (tenant routing + consistency)
-      nav("/tenant-gate", { replace: true });
+      // Redirect to next EXACTLY (e.g. /accept-invitation?token=...)
+      nav(next ?? "/tenant-gate", { replace: true });
     } catch (err) {
       if (err instanceof ApiError) setServerError(err.message);
       else setServerError("Could not update your profile. Try again.");

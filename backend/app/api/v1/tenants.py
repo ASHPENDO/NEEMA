@@ -76,6 +76,29 @@ async def create_tenant(
             },
         )
 
+    # ---------------------------------------------------------
+    # HARD RULE: A user who is already an active member of any tenant
+    # (ADMIN/MANAGER/STAFF) cannot create a new tenant.
+    # Only users with NO memberships can create a tenant (becoming OWNER),
+    # and OWNER is still limited to 1 owned tenant by the rule below.
+    # ---------------------------------------------------------
+    member_stmt = (
+        select(func.count())
+        .select_from(TenantMembership)
+        .where(TenantMembership.user_id == user.id)
+        .where(TenantMembership.is_active.is_(True))
+        .where(TenantMembership.role.in_(["ADMIN", "MANAGER", "STAFF"]))
+    )
+    member_count = int((await db.execute(member_stmt)).scalar_one())
+    if member_count >= 1:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "member_cannot_create_tenant",
+                "message": "You are already a member of a tenant and cannot create a new tenant.",
+            },
+        )
+
     owned_stmt = (
         select(func.count())
         .select_from(TenantMembership)
