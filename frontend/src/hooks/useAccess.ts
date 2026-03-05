@@ -1,5 +1,5 @@
 // frontend/src/hooks/useAccess.ts
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { hasPermission, type Permission, type Role } from "../auth/permissions";
 import { useTenantMembership } from "./useTenantMembership";
 
@@ -15,17 +15,29 @@ export function useAccess() {
   // - If tenant selected => ready only once loading finishes
   const ready = !tenantId || !loading;
 
-  const can = useMemo(() => {
-    return (perm: Permission | string) => hasPermission(membership, perm);
-  }, [membership]);
+  const can = useCallback(
+    (perm: Permission | string) => {
+      if (!membership) return false;
+      return hasPermission(membership, perm);
+    },
+    [membership]
+  );
 
-  const canAny = useMemo(() => {
-    return (perms: Array<Permission | string>) => perms.some((p) => hasPermission(membership, p));
-  }, [membership]);
+  const canAny = useCallback(
+    (perms: Array<Permission | string>) => {
+      if (!membership) return false;
+      return perms.some((p) => hasPermission(membership, p));
+    },
+    [membership]
+  );
 
-  const canAll = useMemo(() => {
-    return (perms: Array<Permission | string>) => perms.every((p) => hasPermission(membership, p));
-  }, [membership]);
+  const canAll = useCallback(
+    (perms: Array<Permission | string>) => {
+      if (!membership) return false;
+      return perms.every((p) => hasPermission(membership, p));
+    },
+    [membership]
+  );
 
   function explainDeny(required?: Permission | string): { allowed: boolean; reason: DenyReason; message: string } {
     if (!tenantId) {

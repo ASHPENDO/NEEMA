@@ -3,13 +3,14 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { useAccess } from "../hooks/useAccess";
 import type { Permission } from "../auth/permissions";
+import { hasPermission } from "../auth/permissions";
 import { api, ApiError } from "../lib/api";
 
 type RequirePermissionsProps = {
   permission?: Permission | string;
   permissions?: Array<Permission | string>;
   requireAll?: boolean; // default: false (require any)
-  redirectTo?: string;  // default: "/dashboard"
+  redirectTo?: string; // default: "/dashboard"
   children: React.ReactNode;
 };
 
@@ -20,6 +21,8 @@ type RequirePermissionsProps = {
  * - If no tenant selected -> /tenant-selection
  * - If token expired/invalid (401 from /tenants/membership) -> /login
  * - If missing permission -> redirectTo (default /dashboard)
+ *
+ * Uses deny-aware hasPermission() from src/auth/permissions.ts when membership exists.
  */
 export default function RequirePermissions({
   permission,
@@ -29,7 +32,7 @@ export default function RequirePermissions({
   children,
 }: RequirePermissionsProps) {
   const location = useLocation();
-  const { tenantId, membership, ready, can, canAny, canAll } = useAccess();
+  const { tenantId, membership, ready } = useAccess();
 
   const [authRedirect, setAuthRedirect] = useState<string | null>(null);
 
@@ -53,22 +56,20 @@ export default function RequirePermissions({
   }
 
   // Membership missing: disambiguate 401 vs other issues by pinging membership endpoint once.
-  // This is only triggered for protected routes when membership is not available.
-  // (Normally, membership should be present via useTenantMembership cache/fetch.)
   if (!membership) {
-    // Kick off a one-time check
-    // NOTE: we do not render children while checking; we will redirect or fall back.
     return <AuthProbe onResult={setAuthRedirect} fallbackTo={redirectTo} from={location.pathname} />;
   }
 
-  // Permission checks
-  let allowed = true;
+  // No permission required -> allow
+  if (required.type === "none") return <>{children}</>;
 
-  if (required.type === "single") {
-    allowed = can(required.perm);
-  } else if (required.type === "multi") {
-    allowed = requireAll ? canAll(required.perms) : canAny(required.perms);
-  }
+  // Permission checks (deny-aware)
+  const allowed =
+    required.type === "single"
+      ? hasPermission(membership, required.perm)
+      : requireAll
+        ? required.perms.every((p) => hasPermission(membership, p))
+        : required.perms.some((p) => hasPermission(membership, p));
 
   if (!allowed) {
     return <Navigate to={redirectTo} replace state={{ from: location.pathname }} />;

@@ -45,12 +45,11 @@ const client = axios.create({
   withCredentials: true,
 });
 
-export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T> {
-  const method = opts.method ?? "GET";
+function buildHeaders(opts: RequestOptions, contentType?: string): Record<string, string> {
   const auth = opts.auth ?? true;
 
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
+    ...(contentType ? { "Content-Type": contentType } : {}),
     ...(opts.headers ?? {}),
   };
 
@@ -67,6 +66,14 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
     headers["X-Tenant-Id"] = tenantId;
   }
 
+  return headers;
+}
+
+export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T> {
+  const method = opts.method ?? "GET";
+
+  const headers = buildHeaders(opts, "application/json");
+
   // Ensure leading slash
   const url = path.startsWith("/") ? path : `/${path}`;
 
@@ -76,6 +83,44 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
       method,
       headers,
       data: opts.body,
+      signal: opts.signal,
+    });
+    return res.data;
+  } catch (err) {
+    const error: any = err;
+    const response = error.response;
+    const status = response?.status ?? 500;
+    const payload = response?.data;
+
+    let message: any =
+      (payload && typeof payload === "object" && "detail" in payload && (payload as any).detail) ||
+      response?.statusText ||
+      "Request failed";
+
+    if (typeof message !== "string") message = "Request failed";
+
+    throw new ApiError({ status, message, details: payload });
+  }
+}
+
+/**
+ * apiForm: same as api(), but sends multipart/form-data safely.
+ * Important: DO NOT set Content-Type here; the browser will set the boundary.
+ */
+export async function apiForm<T>(path: string, form: FormData, opts: Omit<RequestOptions, "body"> = {}): Promise<T> {
+  const method = opts.method ?? "POST";
+
+  const headers = buildHeaders({ ...opts }, undefined);
+
+  // Ensure leading slash
+  const url = path.startsWith("/") ? path : `/${path}`;
+
+  try {
+    const res = await client.request<T>({
+      url,
+      method,
+      headers,
+      data: form,
       signal: opts.signal,
     });
     return res.data;
@@ -110,6 +155,84 @@ export const patch = async <T>(path: string, body?: unknown, opts: RequestOption
 
 export const del = async <T>(path: string, opts: RequestOptions = {}): Promise<T> =>
   api<T>(path, { ...opts, method: "DELETE" });
+
+/*
+ * ============================================================================
+ * Catalog / Products (tenant-scoped)
+ * Backend paths:
+ *   GET    /api/v1/catalog
+ *   POST   /api/v1/catalog
+ *   PATCH  /api/v1/catalog/{item_id}
+ *   DELETE /api/v1/catalog/{item_id}
+ *   POST   /api/v1/catalog/bulk
+ *   POST   /api/v1/catalog/items/bulk-upload   (ZIP upload)
+ * ============================================================================
+ */
+
+export type CatalogItem = {
+  id: string;
+  tenant_id: string;
+  name: string;
+  sku?: string | null;
+  price?: number | null;
+  currency?: string | null;
+  description?: string | null;
+  image_url?: string | null;
+  is_active?: boolean;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type CatalogCreateRequest = {
+  name: string;
+  sku?: string | null;
+  price?: number | null;
+  currency?: string | null;
+  description?: string | null;
+  image_url?: string | null;
+  is_active?: boolean;
+};
+
+export type CatalogUpdateRequest = Partial<CatalogCreateRequest>;
+
+// GET /api/v1/catalog
+export async function listCatalogItems(params?: { q?: string }): Promise<CatalogItem[]> {
+  const query = params?.q ? `?q=${encodeURIComponent(params.q)}` : "";
+  return await get(`/api/v1/catalog${query}`);
+}
+
+// POST /api/v1/catalog
+export async function createCatalogItem(payload: CatalogCreateRequest): Promise<CatalogItem> {
+  return await post(`/api/v1/catalog`, payload);
+}
+
+// PATCH /api/v1/catalog/{id}
+export async function updateCatalogItem(itemId: string, payload: CatalogUpdateRequest): Promise<CatalogItem> {
+  return await patch(`/api/v1/catalog/${encodeURIComponent(itemId)}`, payload);
+}
+
+// DELETE /api/v1/catalog/{id}
+export async function deleteCatalogItem(itemId: string): Promise<{ ok: true }> {
+  return await del(`/api/v1/catalog/${encodeURIComponent(itemId)}`);
+}
+
+// POST /api/v1/catalog/bulk
+export async function bulkCreateCatalogItems(items: CatalogCreateRequest[]): Promise<{ created: CatalogItem[] }> {
+  return await post(`/api/v1/catalog/bulk`, items);
+}
+
+/**
+ * ZIP bulk upload:
+ * POST /api/v1/catalog/items/bulk-upload
+ * Form field: file=<zip>
+ */
+export async function bulkUploadCatalogZip(
+  file: File
+): Promise<{ created: any[]; errors?: { folder: string; reason: string }[] }> {
+  const form = new FormData();
+  form.append("file", file);
+  return await apiForm(`/api/v1/catalog/items/bulk-upload`, form, { method: "POST" });
+}
 
 /*
  * ============================================================================
@@ -228,10 +351,7 @@ export async function listTenantMembers(): Promise<TenantMember[]> {
   return api<TenantMember[]>("/api/v1/tenants/members", { method: "GET" });
 }
 
-export async function updateTenantMember(
-  memberUserId: string,
-  payload: UpdateTenantMemberRequest
-): Promise<TenantMember> {
+export async function updateTenantMember(memberUserId: string, payload: UpdateTenantMemberRequest): Promise<TenantMember> {
   return api<TenantMember>(`/api/v1/tenants/members/${memberUserId}`, {
     method: "PATCH",
     body: payload,

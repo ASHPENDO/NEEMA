@@ -12,6 +12,7 @@ import TenantCreate from "../pages/TenantCreate";
 import TenantInvitations from "../pages/TenantInvitations";
 import ProfileCompletion from "../pages/ProfileCompletion";
 import Dashboard from "../pages/Dashboard";
+import Catalog from "../pages/Catalog";
 
 import RequirePermissions from "../components/RequirePermissions";
 
@@ -51,5 +52,16 @@ export const router = createBrowserRouter([
   },
 
   { path: "/profile-completion", element: <ProfileCompletion /> },
+
   { path: "/dashboard", element: <Dashboard /> },
+
+  // ✅ Catalog / Products
+  {
+    path: "/catalog",
+    element: (
+      <RequirePermissions permission="catalog.read">
+        <Catalog />
+      </RequirePermissions>
+    ),
+  },
 ]);
