@@ -6,11 +6,13 @@ export function PageShell({
   title,
   subtitle,
   right,
+  workspaceName,
   children,
 }: {
   title: string;
   subtitle?: string;
   right?: React.ReactNode;
+  workspaceName?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -24,7 +26,17 @@ export function PageShell({
         <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div className="min-w-0">
             <div className="text-xs font-semibold tracking-wide text-slate-500">POSTIKA</div>
-            <h1 className="mt-1 text-2xl font-semibold text-slate-900">{title}</h1>
+
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              <h1 className="text-2xl font-semibold text-slate-900">{title}</h1>
+
+              {workspaceName ? (
+                <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-700">
+                  Workspace: {workspaceName}
+                </span>
+              ) : null}
+            </div>
+
             {subtitle ? <p className="mt-2 text-sm text-slate-600">{subtitle}</p> : null}
           </div>
 

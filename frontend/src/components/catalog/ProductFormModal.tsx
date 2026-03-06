@@ -94,8 +94,8 @@ export function ProductFormModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-xl rounded-2xl bg-white p-5 shadow-lg">
-        <div className="flex items-center justify-between gap-3">
+      <div className="flex max-h-[90vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl bg-white shadow-lg">
+        <div className="flex items-center justify-between gap-3 border-b border-black/10 px-5 py-4">
           <div className="text-lg font-semibold">
             {state.mode === "create" ? "Add product" : "Edit product"}
           </div>
@@ -109,76 +109,78 @@ export function ProductFormModal({
           </button>
         </div>
 
-        <div className="mt-4 grid grid-cols-1 gap-3">
-          <InputField
-            label="Title *"
-            value={title}
-            onChange={setTitle}
-            placeholder="e.g. Shea Butter Lotion"
-          />
-
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <div className="flex-1 overflow-y-auto px-5 py-4">
+          <div className="grid grid-cols-1 gap-3">
             <InputField
-              label="SKU"
-              value={sku}
-              onChange={setSku}
-              placeholder="e.g. LOT-001"
+              label="Title *"
+              value={title}
+              onChange={setTitle}
+              placeholder="e.g. Shea Butter Lotion"
             />
-            <InputField
-              label="Currency"
-              value={priceCurrency}
-              onChange={setPriceCurrency}
-              placeholder="KES"
-            />
-          </div>
 
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            <div>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               <InputField
-                label="Price *"
-                value={priceAmount}
-                onChange={setPriceAmount}
-                placeholder="e.g. 1200"
-                inputMode="decimal"
+                label="SKU"
+                value={sku}
+                onChange={setSku}
+                placeholder="e.g. LOT-001"
               />
-              {!isPriceValid && (
-                <div className="mt-1 text-xs text-red-600">Enter a valid price greater than 0.</div>
+              <InputField
+                label="Currency"
+                value={priceCurrency}
+                onChange={setPriceCurrency}
+                placeholder="KES"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <div>
+                <InputField
+                  label="Price *"
+                  value={priceAmount}
+                  onChange={setPriceAmount}
+                  placeholder="e.g. 1200"
+                  inputMode="decimal"
+                />
+                {!isPriceValid && (
+                  <div className="mt-1 text-xs text-red-600">Enter a valid price greater than 0.</div>
+                )}
+              </div>
+
+              {state.mode === "edit" ? (
+                <div>
+                  <div className="mb-1 text-xs font-medium opacity-70">Status</div>
+                  <select
+                    className="w-full rounded-xl border border-black/10 p-3 text-sm outline-none focus:ring-2 focus:ring-black/10"
+                    value={status}
+                    onChange={(e) => setStatus(e.target.value)}
+                    disabled={busy}
+                  >
+                    <option value="active">Active</option>
+                    <option value="inactive">Inactive</option>
+                  </select>
+                </div>
+              ) : (
+                <div className="flex items-end">
+                  <div className="text-xs opacity-60">New products are created as active.</div>
+                </div>
               )}
             </div>
 
-            {state.mode === "edit" ? (
-              <div>
-                <div className="mb-1 text-xs font-medium opacity-70">Status</div>
-                <select
-                  className="w-full rounded-xl border border-black/10 p-3 text-sm outline-none focus:ring-2 focus:ring-black/10"
-                  value={status}
-                  onChange={(e) => setStatus(e.target.value)}
-                  disabled={busy}
-                >
-                  <option value="active">Active</option>
-                  <option value="inactive">Inactive</option>
-                </select>
-              </div>
-            ) : (
-              <div className="flex items-end">
-                <div className="text-xs opacity-60">New products are created as active.</div>
-              </div>
-            )}
-          </div>
-
-          <div>
-            <div className="mb-1 text-xs font-medium opacity-70">Description</div>
-            <textarea
-              className="w-full rounded-xl border border-black/10 p-3 text-sm outline-none focus:ring-2 focus:ring-black/10"
-              rows={4}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Short product description..."
-            />
+            <div>
+              <div className="mb-1 text-xs font-medium opacity-70">Description</div>
+              <textarea
+                className="w-full rounded-xl border border-black/10 p-3 text-sm outline-none focus:ring-2 focus:ring-black/10"
+                rows={4}
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Short product description..."
+              />
+            </div>
           </div>
         </div>
 
-        <div className="mt-5 flex items-center justify-end gap-2">
+        <div className="flex items-center justify-end gap-2 border-t border-black/10 px-5 py-4">
           <Button variant="secondary" onClick={onClose} disabled={busy}>
             Cancel
           </Button>

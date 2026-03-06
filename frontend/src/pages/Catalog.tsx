@@ -6,6 +6,7 @@ import { Button } from "../components/Button";
 import ImportFromUrlModal from "../components/catalog/ImportFromUrlModal";
 import {
   ApiError,
+  getTenants,
   type CatalogCreateRequest,
   type CatalogItem,
   type CatalogScrapeResponse,
@@ -30,6 +31,11 @@ function normalizeSearch(value: string) {
   return value.trim().toLowerCase();
 }
 
+type TenantSummary = {
+  id: string;
+  name: string;
+};
+
 export default function Catalog() {
   const { membership, ready, tenantId } = useAccess();
 
@@ -52,6 +58,8 @@ export default function Catalog() {
 
   const [importUrlOpen, setImportUrlOpen] = useState(false);
   const [pageMessage, setPageMessage] = useState<string>("");
+
+  const [tenantName, setTenantName] = useState<string>("");
 
   const filteredItems = useMemo(() => {
     const search = normalizeSearch(q);
@@ -90,10 +98,33 @@ export default function Catalog() {
     }
   }, [tenantId, canRead]);
 
+  const loadActiveTenantName = useCallback(async () => {
+    if (!tenantId) {
+      setTenantName("");
+      return;
+    }
+
+    try {
+      const tenants = await getTenants<TenantSummary[]>();
+      const active = Array.isArray(tenants)
+        ? tenants.find((t) => t.id === tenantId)
+        : undefined;
+
+      setTenantName(active?.name ?? "");
+    } catch {
+      setTenantName("");
+    }
+  }, [tenantId]);
+
   useEffect(() => {
     if (!ready) return;
     void loadCatalog();
   }, [ready, loadCatalog]);
+
+  useEffect(() => {
+    if (!ready) return;
+    void loadActiveTenantName();
+  }, [ready, loadActiveTenantName]);
 
   async function handleCreate(payload: CatalogCreateRequest) {
     try {
@@ -182,6 +213,7 @@ export default function Catalog() {
     <PageShell
       title="Catalog"
       subtitle="Manage tenant products. Create, edit, delete, bulk-upload catalog items, and import from website URLs."
+      workspaceName={tenantName || undefined}
       right={
         <div className="flex flex-wrap items-center gap-2">
           {canImport && (
