@@ -1,29 +1,18 @@
 // frontend/src/components/RequirePermissions.tsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { useAccess } from "../hooks/useAccess";
 import type { Permission } from "../auth/permissions";
 import { hasPermission } from "../auth/permissions";
-import { api, ApiError } from "../lib/api";
 
 type RequirePermissionsProps = {
   permission?: Permission | string;
   permissions?: Array<Permission | string>;
-  requireAll?: boolean; // default: false (require any)
-  redirectTo?: string; // default: "/dashboard"
+  requireAll?: boolean; // default false => require any
+  redirectTo?: string; // default /dashboard
   children: React.ReactNode;
 };
 
-/**
- * Hard permission gate + redirect.
- *
- * - Waits for membership resolution (no flicker)
- * - If no tenant selected -> /tenant-selection
- * - If token expired/invalid (401 from /tenants/membership) -> /login
- * - If missing permission -> redirectTo (default /dashboard)
- *
- * Uses deny-aware hasPermission() from src/auth/permissions.ts when membership exists.
- */
 export default function RequirePermissions({
   permission,
   permissions,
@@ -34,36 +23,35 @@ export default function RequirePermissions({
   const location = useLocation();
   const { tenantId, membership, ready } = useAccess();
 
-  const [authRedirect, setAuthRedirect] = useState<string | null>(null);
-
   const required = useMemo(() => {
-    if (permissions && permissions.length > 0) return { type: "multi" as const, perms: permissions };
-    if (permission) return { type: "single" as const, perm: permission };
+    if (permissions && permissions.length > 0) {
+      return { type: "multi" as const, perms: permissions };
+    }
+    if (permission) {
+      return { type: "single" as const, perm: permission };
+    }
     return { type: "none" as const };
   }, [permission, permissions]);
 
-  // Still loading membership -> render nothing to prevent flicker
+  // Prevent flicker while tenant membership is still resolving
   if (!ready) return null;
 
-  // No tenant selected
+  // Tenant-scoped routes must have an active tenant
   if (!tenantId) {
     return <Navigate to="/tenant-selection" replace state={{ from: location.pathname }} />;
   }
 
-  // If we already determined auth is invalid -> login
-  if (authRedirect) {
-    return <Navigate to={authRedirect} replace state={{ from: location.pathname }} />;
-  }
-
-  // Membership missing: disambiguate 401 vs other issues by pinging membership endpoint once.
+  // No membership after ready => safest fallback is dashboard
+  // (auth expiry / invalid token should already be handled by auth/bootstrap logic)
   if (!membership) {
-    return <AuthProbe onResult={setAuthRedirect} fallbackTo={redirectTo} from={location.pathname} />;
+    return <Navigate to={redirectTo} replace state={{ from: location.pathname }} />;
   }
 
-  // No permission required -> allow
-  if (required.type === "none") return <>{children}</>;
+  // No permission requirement
+  if (required.type === "none") {
+    return <>{children}</>;
+  }
 
-  // Permission checks (deny-aware)
   const allowed =
     required.type === "single"
       ? hasPermission(membership, required.perm)
@@ -76,54 +64,4 @@ export default function RequirePermissions({
   }
 
   return <>{children}</>;
-}
-
-/**
- * Small helper component that probes /tenants/membership to determine if the user
- * is unauthenticated (401) and should be redirected to /login.
- */
-function AuthProbe({
-  onResult,
-  fallbackTo,
-  from,
-}: {
-  onResult: (to: string) => void;
-  fallbackTo: string;
-  from: string;
-}) {
-  const [done, setDone] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    (async () => {
-      try {
-        // If token is expired/invalid, backend should respond 401.
-        await api("/api/v1/tenants/membership", { method: "GET" });
-        if (cancelled) return;
-
-        // If membership exists but hook hasn't caught up yet, just send them to fallback route.
-        onResult(fallbackTo);
-      } catch (e) {
-        if (cancelled) return;
-
-        if (e instanceof ApiError && e.status === 401) {
-          onResult("/login");
-        } else {
-          // Any other error: safest is fallback route (dashboard)
-          onResult(fallbackTo);
-        }
-      } finally {
-        if (!cancelled) setDone(true);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [onResult, fallbackTo]);
-
-  // Render nothing (hard block, no flicker)
-  if (!done) return null;
-  return null;
 }

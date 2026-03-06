@@ -3,35 +3,42 @@ import React, { useEffect, useMemo, useState } from "react";
 import { PageShell } from "../components/PageShell";
 import { Input } from "../components/Input";
 import { Button } from "../components/Button";
-import { ApiError } from "../lib/api";
 import {
+  ApiError,
+  type CatalogCreateRequest,
   type CatalogItem,
-  listCatalogItems,
-  createCatalogItem,
-  updateCatalogItem,
-  deleteCatalogItem,
+  type CatalogUpdateRequest,
   bulkUploadCatalogZip,
+  createCatalogItem,
+  deleteCatalogItem,
+  listCatalogItems,
+  updateCatalogItem,
 } from "../lib/api";
-import { useAuth } from "../auth/AuthContext";
-import { canDeleteCatalog, canImportCatalog, canReadCatalog, canWriteCatalog } from "../auth/permissions";
+import { useAccess } from "../hooks/useAccess";
+import {
+  canDeleteCatalog,
+  canImportCatalog,
+  canReadCatalog,
+  canWriteCatalog,
+} from "../auth/permissions";
 import { ProductTable } from "../components/catalog/ProductTable";
 import { ProductFormModal, type ProductFormModalState } from "../components/catalog/ProductFormModal";
 
-function normalizeSearch(s: string) {
-  return s.trim().toLowerCase();
+function normalizeSearch(value: string) {
+  return value.trim().toLowerCase();
 }
 
 export default function Catalog() {
-  const { me } = useAuth();
+  const { membership, ready, tenantId } = useAccess();
 
-  const canRead = canReadCatalog(me);
-  const canWrite = canWriteCatalog(me);
-  const canImport = canImportCatalog(me);
-  const canDelete = canDeleteCatalog(me);
+  const canRead = canReadCatalog(membership);
+  const canWrite = canWriteCatalog(membership);
+  const canImport = canImportCatalog(membership);
+  const canDelete = canDeleteCatalog(membership);
 
   const [items, setItems] = useState<CatalogItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [busy, setBusy] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
   const [q, setQ] = useState("");
@@ -41,19 +48,27 @@ export default function Catalog() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadSummary, setUploadSummary] = useState<{ created: number; errors: number } | null>(null);
 
-  const filtered = useMemo(() => {
-    const s = normalizeSearch(q);
-    if (!s) return items;
+  const filteredItems = useMemo(() => {
+    const search = normalizeSearch(q);
+    if (!search) return items;
 
-    return items.filter((p) => {
-      const hay = `${p.name ?? ""} ${p.sku ?? ""} ${p.description ?? ""}`.toLowerCase();
-      return hay.includes(s);
+    return items.filter((item) => {
+      const haystack = `${item.name ?? ""} ${item.sku ?? ""} ${item.description ?? ""}`.toLowerCase();
+      return haystack.includes(search);
     });
   }, [items, q]);
 
   async function refresh() {
+    if (!tenantId) {
+      setItems([]);
+      setError("Select a tenant to view catalog items.");
+      setLoading(false);
+      return;
+    }
+
     if (!canRead) {
-      setError("You don’t have permission to view products.");
+      setItems([]);
+      setError("You do not have permission to view catalog items.");
       setLoading(false);
       return;
     }
@@ -64,78 +79,84 @@ export default function Catalog() {
       const data = await listCatalogItems();
       setItems(Array.isArray(data) ? data : []);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Failed to load products.");
+      setError(e instanceof ApiError ? e.message : "Failed to load catalog items.");
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    refresh();
+    if (!ready) return;
+    void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [ready, tenantId, canRead]);
 
-  async function onCreate(payload: any) {
+  async function handleCreate(payload: CatalogCreateRequest) {
     try {
       setBusy(true);
       setError(null);
+
       const created = await createCatalogItem(payload);
       setItems((prev) => [created, ...prev]);
       setModal({ open: false });
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Failed to create product.");
+      setError(e instanceof ApiError ? e.message : "Failed to create catalog item.");
     } finally {
       setBusy(false);
     }
   }
 
-  async function onEdit(item: CatalogItem, payload: any) {
+  async function handleEdit(item: CatalogItem, payload: CatalogUpdateRequest) {
     try {
       setBusy(true);
       setError(null);
+
       const updated = await updateCatalogItem(item.id, payload);
-      setItems((prev) => prev.map((x) => (x.id === item.id ? updated : x)));
+      setItems((prev) => prev.map((entry) => (entry.id === item.id ? updated : entry)));
       setModal({ open: false });
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Failed to update product.");
+      setError(e instanceof ApiError ? e.message : "Failed to update catalog item.");
     } finally {
       setBusy(false);
     }
   }
 
-  async function onDelete(item: CatalogItem) {
-    const ok = window.confirm(`Delete "${item.name}"? This cannot be undone.`);
-    if (!ok) return;
+  async function handleDelete(item: CatalogItem) {
+    const confirmed = window.confirm(`Delete "${item.name}"? This action cannot be undone.`);
+    if (!confirmed) return;
 
     try {
       setBusy(true);
       setError(null);
+
       await deleteCatalogItem(item.id);
-      setItems((prev) => prev.filter((x) => x.id !== item.id));
+      setItems((prev) => prev.filter((entry) => entry.id !== item.id));
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Failed to delete product.");
+      setError(e instanceof ApiError ? e.message : "Failed to delete catalog item.");
     } finally {
       setBusy(false);
     }
   }
 
-  async function onUploadZip(file: File) {
+  async function handleZipUpload(file: File) {
     try {
       setUploading(true);
       setUploadError(null);
       setUploadSummary(null);
 
-      const res = await bulkUploadCatalogZip(file);
+      const result = await bulkUploadCatalogZip(file);
 
-      const createdCount = Array.isArray(res.created) ? res.created.length : 0;
-      const errorsCount = Array.isArray(res.errors) ? res.errors.length : 0;
+      const createdCount = Array.isArray(result.created) ? result.created.length : 0;
+      const errorsCount = Array.isArray(result.errors) ? result.errors.length : 0;
 
-      setUploadSummary({ created: createdCount, errors: errorsCount });
+      setUploadSummary({
+        created: createdCount,
+        errors: errorsCount,
+      });
 
-      // refresh list because upload creates many products
       await refresh();
     } catch (e) {
-      setUploadError(e instanceof ApiError ? e.message : "Bulk upload failed.");
+      setUploadError(e instanceof ApiError ? e.message : "Bulk ZIP upload failed.");
     } finally {
       setUploading(false);
     }
@@ -143,35 +164,36 @@ export default function Catalog() {
 
   return (
     <PageShell
-      title="Products"
-      subtitle="Manage your product catalog. Bulk upload supports ZIP bundles with details.json per product."
+      title="Catalog"
+      subtitle="Manage tenant products. Create, edit, delete, and bulk-upload catalog items."
       right={
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {canImport && (
             <label className="inline-flex cursor-pointer items-center">
               <input
                 type="file"
                 accept=".zip"
                 className="hidden"
-                disabled={uploading || busy}
+                disabled={uploading || busy || !ready}
                 onChange={(e) => {
-                  const f = e.target.files?.[0];
+                  const file = e.target.files?.[0];
                   e.currentTarget.value = "";
-                  if (f) onUploadZip(f);
+                  if (file) void handleZipUpload(file);
                 }}
               />
-              <Button variant="secondary" disabled={uploading || busy}>
+              <Button variant="secondary" disabled={uploading || busy || !ready}>
                 {uploading ? "Uploading..." : "Bulk upload ZIP"}
               </Button>
             </label>
           )}
 
-          {canWrite ? (
-            <Button onClick={() => setModal({ open: true, mode: "create" })} disabled={busy || uploading}>
+          {canWrite && (
+            <Button
+              onClick={() => setModal({ open: true, mode: "create" })}
+              disabled={busy || uploading || !ready}
+            >
               Add product
             </Button>
-          ) : (
-            <div className="text-xs opacity-60 self-center">No write access</div>
           )}
         </div>
       }
@@ -179,42 +201,61 @@ export default function Catalog() {
       <div className="space-y-4">
         <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div className="w-full md:max-w-md">
-            <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search products by name, SKU…" />
+            <Input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search by name, SKU, description..."
+            />
           </div>
-          <div className="flex gap-2">
-            <Button variant="secondary" onClick={refresh} disabled={loading || busy || uploading}>
+
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => void refresh()}
+              disabled={!ready || loading || busy || uploading}
+            >
               Refresh
             </Button>
           </div>
         </div>
 
-        {error ? (
-          <div className="rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>
-        ) : null}
+        {error && (
+          <div className="rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            {error}
+          </div>
+        )}
 
-        {uploadError ? (
-          <div className="rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{uploadError}</div>
-        ) : null}
+        {uploadError && (
+          <div className="rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            {uploadError}
+          </div>
+        )}
 
-        {uploadSummary ? (
+        {uploadSummary && (
           <div className="rounded-2xl border border-black/10 bg-white p-3 text-sm">
-            <div className="font-medium">Bulk upload finished</div>
+            <div className="font-medium">Bulk upload completed</div>
             <div className="mt-1 opacity-70">
               Created: <span className="font-medium">{uploadSummary.created}</span> · Errors:{" "}
               <span className="font-medium">{uploadSummary.errors}</span>
             </div>
           </div>
-        ) : null}
+        )}
 
-        {loading ? (
-          <div className="rounded-2xl border border-black/10 bg-white p-6 text-sm opacity-70">Loading…</div>
+        {!ready ? (
+          <div className="rounded-2xl border border-black/10 bg-white p-6 text-sm opacity-70">
+            Resolving tenant access...
+          </div>
+        ) : loading ? (
+          <div className="rounded-2xl border border-black/10 bg-white p-6 text-sm opacity-70">
+            Loading catalog items...
+          </div>
         ) : (
           <ProductTable
-            items={filtered}
+            items={filteredItems}
             canWrite={canWrite}
             canDelete={canDelete}
-            onEdit={(p) => setModal({ open: true, mode: "edit", initial: p })}
-            onDelete={onDelete}
+            onEdit={(item) => setModal({ open: true, mode: "edit", initial: item })}
+            onDelete={(item) => void handleDelete(item)}
           />
         )}
       </div>
@@ -225,8 +266,12 @@ export default function Catalog() {
         onClose={() => setModal({ open: false })}
         onSubmit={(payload) => {
           if (!modal.open) return Promise.resolve();
-          if (modal.mode === "create") return onCreate(payload);
-          return onEdit(modal.initial, payload);
+
+          if (modal.mode === "create") {
+            return handleCreate(payload as CatalogCreateRequest);
+          }
+
+          return handleEdit(modal.initial, payload as CatalogUpdateRequest);
         }}
       />
     </PageShell>

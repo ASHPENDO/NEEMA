@@ -46,9 +46,6 @@ export function useTenantMembership() {
 
   const [error, setError] = useState<string | null>(null);
 
-  // Subscribe to tenant changes:
-  // - Cross-tab: localStorage "storage" event
-  // - Same-tab: ACTIVE_TENANT_CHANGED_EVENT dispatched by tenantStorage.set/clear
   useEffect(() => {
     function onStorage(e: StorageEvent) {
       if (e.key === "postika.activeTenantId") {
@@ -77,7 +74,6 @@ export function useTenantMembership() {
       return;
     }
 
-    // If cached, no fetch needed
     if (membershipCache.has(tenantId)) {
       setMembership(membershipCache.get(tenantId)!);
       setLoading(false);
@@ -88,6 +84,9 @@ export function useTenantMembership() {
     let cancelled = false;
 
     async function fetchMembership() {
+      // clear stale membership immediately when switching to a tenant
+      // whose membership is not yet cached
+      setMembership(null);
       setLoading(true);
       setError(null);
 
@@ -102,10 +101,12 @@ export function useTenantMembership() {
         if (cancelled) return;
 
         const err = e as ApiError;
-        setError(err?.message ?? "Failed to fetch membership.");
         setMembership(null);
+        setError(err?.message ?? "Failed to fetch membership.");
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     }
 
@@ -129,6 +130,8 @@ export function useTenantMembership() {
       setMembership(data);
     } catch (e) {
       const err = e as ApiError;
+      setMembership(null);
+      membershipCache.delete(tenantId);
       setError(err?.message ?? "Failed to refresh membership.");
     } finally {
       setLoading(false);

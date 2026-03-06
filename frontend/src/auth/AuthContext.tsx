@@ -51,24 +51,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setMe(null);
       return;
     }
-    const data = await api<any>("/api/v1/auth/me", { method: "GET", auth: true });
+
+    const data = await api<any>("/api/v1/auth/me", {
+      method: "GET",
+      auth: true,
+    });
+
     setMe(normalizeMe(data));
   }
 
-  // 🔴 HARDENED LOGOUT
   function logout() {
     try {
-      // Clear all storages
       tokenStorage.clear();
       pendingEmailStorage.clear();
       activeTenantStorage.clear();
       clearTenantMembershipCache();
 
-      // Reset in-memory state
       setToken(null);
       setMe(null);
     } finally {
-      // Hard navigation ensures full SPA reset (prevents ghost auth state)
       window.location.assign("/login");
     }
   }
@@ -89,9 +90,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     const accessToken = res.access_token;
-    if (!accessToken) throw new Error("Missing access token from server response.");
+    if (!accessToken) {
+      throw new Error("Missing access token from server response.");
+    }
 
     tokenStorage.set(accessToken);
+    clearTenantMembershipCache();
     setToken(accessToken);
 
     await refreshMe();
@@ -103,15 +107,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       auth: true,
       body: payload,
     });
+
     setMe(normalizeMe(updated));
   }
 
   function getPendingEmail() {
     return pendingEmailStorage.get();
   }
+
   function setPendingEmail(email: string) {
     pendingEmailStorage.set(email);
   }
+
   function clearPendingEmail() {
     pendingEmailStorage.clear();
   }
@@ -123,6 +130,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     (async () => {
       try {
         if (tokenStorage.get()) {
+          clearTenantMembershipCache();
           await refreshMe();
         }
       } catch (e) {
@@ -174,5 +182,6 @@ export function isProfileComplete(me: MeResponse | null) {
 
   const nameOk = !!((me as any).name && String((me as any).name).trim().length >= 2);
   const phoneOk = !!((me as any).phone_number && String((me as any).phone_number).trim().length >= 8);
+
   return nameOk && phoneOk;
 }
