@@ -25,59 +25,68 @@ export function ProductFormModal({
   const open = state.open;
   const initial = state.open && state.mode === "edit" ? state.initial : null;
 
-  const [name, setName] = useState("");
+  const [title, setTitle] = useState("");
   const [sku, setSku] = useState("");
-  const [price, setPrice] = useState("");
-  const [currency, setCurrency] = useState("KES");
+  const [priceAmount, setPriceAmount] = useState("");
+  const [priceCurrency, setPriceCurrency] = useState("KES");
   const [description, setDescription] = useState("");
-  const [imageUrl, setImageUrl] = useState("");
-  const [isActive, setIsActive] = useState(true);
+  const [status, setStatus] = useState("active");
 
   useEffect(() => {
     if (!open) return;
 
     if (initial) {
-      setName(initial.name ?? "");
+      setTitle(initial.title ?? "");
       setSku(initial.sku ?? "");
-      setPrice(initial.price == null ? "" : String(initial.price));
-      setCurrency(initial.currency ?? "KES");
+      setPriceAmount(initial.price_amount == null ? "" : String(initial.price_amount));
+      setPriceCurrency(initial.price_currency ?? "KES");
       setDescription(initial.description ?? "");
-      setImageUrl(initial.image_url ?? "");
-      setIsActive(initial.is_active ?? true);
+      setStatus(initial.status ?? "active");
       return;
     }
 
-    setName("");
+    setTitle("");
     setSku("");
-    setPrice("");
-    setCurrency("KES");
+    setPriceAmount("");
+    setPriceCurrency("KES");
     setDescription("");
-    setImageUrl("");
-    setIsActive(true);
+    setStatus("active");
   }, [open, initial]);
 
-  const priceValue = useMemo(() => {
-    if (price.trim() === "") return null;
-    const n = Number(price);
+  const numericPrice = useMemo(() => {
+    if (priceAmount.trim() === "") return NaN;
+    const n = Number(priceAmount);
     return Number.isFinite(n) ? n : NaN;
-  }, [price]);
+  }, [priceAmount]);
 
-  const isPriceValid = price.trim() === "" || Number.isFinite(priceValue);
+  const isPriceValid = Number.isFinite(numericPrice) && numericPrice > 0;
 
   if (!open) return null;
 
   async function handleSubmit() {
-    if (!name.trim()) return;
+    if (!title.trim()) return;
     if (!isPriceValid) return;
 
-    const payload: CatalogCreateRequest | CatalogUpdateRequest = {
-      name: name.trim(),
+    if (state.mode === "create") {
+      const payload: CatalogCreateRequest = {
+        title: title.trim(),
+        sku: sku.trim() || null,
+        description: description.trim() || null,
+        price_amount: Number(priceAmount),
+        price_currency: priceCurrency.trim() || "KES",
+      };
+
+      await onSubmit(payload);
+      return;
+    }
+
+    const payload: CatalogUpdateRequest = {
+      title: title.trim(),
       sku: sku.trim() || null,
-      price: price.trim() === "" ? null : Number(price),
-      currency: currency.trim() || null,
       description: description.trim() || null,
-      image_url: imageUrl.trim() || null,
-      is_active: isActive,
+      price_amount: Number(priceAmount),
+      price_currency: priceCurrency.trim() || "KES",
+      status,
     };
 
     await onSubmit(payload);
@@ -102,9 +111,9 @@ export function ProductFormModal({
 
         <div className="mt-4 grid grid-cols-1 gap-3">
           <InputField
-            label="Name *"
-            value={name}
-            onChange={setName}
+            label="Title *"
+            value={title}
+            onChange={setTitle}
             placeholder="e.g. Shea Butter Lotion"
           />
 
@@ -117,8 +126,8 @@ export function ProductFormModal({
             />
             <InputField
               label="Currency"
-              value={currency}
-              onChange={setCurrency}
+              value={priceCurrency}
+              onChange={setPriceCurrency}
               placeholder="KES"
             />
           </div>
@@ -126,35 +135,36 @@ export function ProductFormModal({
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <div>
               <InputField
-                label="Price"
-                value={price}
-                onChange={setPrice}
+                label="Price *"
+                value={priceAmount}
+                onChange={setPriceAmount}
                 placeholder="e.g. 1200"
                 inputMode="decimal"
               />
               {!isPriceValid && (
-                <div className="mt-1 text-xs text-red-600">Enter a valid numeric price.</div>
+                <div className="mt-1 text-xs text-red-600">Enter a valid price greater than 0.</div>
               )}
             </div>
 
-            <div className="flex items-end">
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={isActive}
-                  onChange={(e) => setIsActive(e.target.checked)}
-                />
-                Active
-              </label>
-            </div>
+            {state.mode === "edit" ? (
+              <div>
+                <div className="mb-1 text-xs font-medium opacity-70">Status</div>
+                <select
+                  className="w-full rounded-xl border border-black/10 p-3 text-sm outline-none focus:ring-2 focus:ring-black/10"
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value)}
+                  disabled={busy}
+                >
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+              </div>
+            ) : (
+              <div className="flex items-end">
+                <div className="text-xs opacity-60">New products are created as active.</div>
+              </div>
+            )}
           </div>
-
-          <InputField
-            label="Image URL"
-            value={imageUrl}
-            onChange={setImageUrl}
-            placeholder="https://..."
-          />
 
           <div>
             <div className="mb-1 text-xs font-medium opacity-70">Description</div>
@@ -172,7 +182,7 @@ export function ProductFormModal({
           <Button variant="secondary" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={() => void handleSubmit()} disabled={busy || !name.trim() || !isPriceValid}>
+          <Button onClick={() => void handleSubmit()} disabled={busy || !title.trim() || !isPriceValid}>
             {busy ? "Saving..." : "Save"}
           </Button>
         </div>

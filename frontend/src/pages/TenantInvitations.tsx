@@ -66,9 +66,10 @@ export default function TenantInvitations() {
       nav("/tenant-selection", { replace: true });
       return;
     }
+
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [tenantId]);
 
   async function refresh() {
     setLoading(true);
@@ -82,9 +83,9 @@ export default function TenantInvitations() {
     } catch (e) {
       const err = e as ApiError;
 
-      if (err.status === 403) {
+      if (err?.status === 403) {
         setPermissionDenied(true);
-        setError("You don’t have permission to manage invitations.");
+        setError("You do not have permission to manage invitations.");
       } else {
         setError(err?.message ?? "Failed to load invitations.");
       }
@@ -111,11 +112,11 @@ export default function TenantInvitations() {
     } catch (e) {
       const err = e as ApiError;
 
-      if (err.status === 409) {
+      if (err?.status === 409) {
         setFormError("This user is already a member of this workspace.");
-      } else if (err.status === 403) {
+      } else if (err?.status === 403) {
         setPermissionDenied(true);
-        setFormError("You don’t have permission to invite members.");
+        setFormError("You do not have permission to invite members.");
       } else {
         setFormError(err?.message ?? "Failed to create invitation.");
       }
@@ -132,13 +133,13 @@ export default function TenantInvitations() {
     } catch (e) {
       const err = e as ApiError;
 
-      if (err.status === 409) {
-        alert(err?.message ?? "This invitation can’t be resent (accepted/revoked/expired).");
-      } else if (err.status === 403) {
+      if (err?.status === 409) {
+        alert(err?.message ?? "This invitation cannot be resent.");
+      } else if (err?.status === 403) {
         setPermissionDenied(true);
-        alert("You don’t have permission to resend invitations.");
-      } else if (err.status === 404) {
-        alert("Invitation not found (it may have been revoked).");
+        alert("You do not have permission to resend invitations.");
+      } else if (err?.status === 404) {
+        alert("Invitation not found.");
       } else {
         alert(err?.message ?? "Failed to resend invitation.");
       }
@@ -158,13 +159,13 @@ export default function TenantInvitations() {
     } catch (e) {
       const err = e as ApiError;
 
-      if (err.status === 409) {
-        alert(err?.message ?? "This invitation can’t be revoked (accepted/revoked/expired).");
-      } else if (err.status === 403) {
+      if (err?.status === 409) {
+        alert(err?.message ?? "This invitation cannot be revoked.");
+      } else if (err?.status === 403) {
         setPermissionDenied(true);
-        alert("You don’t have permission to revoke invitations.");
-      } else if (err.status === 404) {
-        alert("Invitation not found (it may have been revoked).");
+        alert("You do not have permission to revoke invitations.");
+      } else if (err?.status === 404) {
+        alert("Invitation not found.");
       } else {
         alert(err?.message ?? "Failed to revoke invitation.");
       }
@@ -177,35 +178,34 @@ export default function TenantInvitations() {
     <PageShell title="Tenant Invitations" subtitle="Invite your team members into this tenant.">
       <div className="space-y-6">
         {permissionDenied && (
-          <div className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 p-3 text-yellow-200 text-sm">
-            You don’t have permission to manage invitations in this tenant.
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            You do not have permission to manage invitations in this tenant.
           </div>
         )}
 
-        {/* Create invitation */}
-        <form onSubmit={onCreate} className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+        <form onSubmit={onCreate} className="rounded-2xl border border-slate-200 bg-white p-4 space-y-3">
+          <div className="grid grid-cols-1 items-end gap-3 md:grid-cols-3">
             <div className="md:col-span-2">
-              <label className="block text-sm text-white/80 mb-1">Invitee email</label>
+              <label className="mb-1 block text-sm text-slate-700">Invitee email</label>
               <Input
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="team@company.com"
                 disabled={permissionDenied}
               />
-              {emailError && <p className="text-sm text-red-300 mt-1">{emailError}</p>}
+              {emailError && <p className="mt-1 text-sm text-red-600">{emailError}</p>}
             </div>
 
             <div>
-              <label className="block text-sm text-white/80 mb-1">Role</label>
+              <label className="mb-1 block text-sm text-slate-700">Role</label>
               <select
                 value={role}
                 onChange={(e) => setRole(e.target.value as TenantRole)}
                 disabled={permissionDenied}
-                className="w-full rounded-xl bg-black/20 border border-white/10 px-3 py-2 text-white"
+                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900"
               >
                 {ROLE_OPTIONS.map((r) => (
-                  <option key={r} value={r} className="bg-black">
+                  <option key={r} value={r}>
                     {r}
                   </option>
                 ))}
@@ -213,62 +213,60 @@ export default function TenantInvitations() {
             </div>
           </div>
 
-          {formError && <p className="text-sm text-red-300">{formError}</p>}
+          {formError && <p className="text-sm text-red-600">{formError}</p>}
 
           <div className="flex gap-2">
             <Button type="submit" disabled={submitting || !!emailError || email.length === 0 || permissionDenied}>
               {submitting ? "Inviting..." : "Send invitation"}
             </Button>
             <Button type="button" variant="secondary" onClick={() => nav("/dashboard")}>
-              Back to dashboard
+              Back
             </Button>
           </div>
         </form>
 
-        {/* List invitations */}
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-semibold text-white">Invitations</h2>
+        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-slate-900">Invitations</h2>
             <Button type="button" variant="secondary" onClick={refresh} disabled={loading}>
               Refresh
             </Button>
           </div>
 
           {loading ? (
-            <p className="text-white/70">Loading...</p>
+            <p className="text-sm text-slate-600">Loading...</p>
           ) : error ? (
-            <p className="text-red-300">{error}</p>
+            <p className="text-sm text-red-600">{error}</p>
           ) : items.length === 0 ? (
-            <p className="text-white/70">No invitations yet.</p>
+            <p className="text-sm text-slate-600">No invitations yet.</p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="text-white/70">
-                  <tr className="border-b border-white/10">
-                    <th className="text-left py-2 pr-3">Email</th>
-                    <th className="text-left py-2 pr-3">Role</th>
-                    <th className="text-left py-2 pr-3">Status</th>
-                    <th className="text-left py-2 pr-3">Expires</th>
-                    <th className="text-left py-2 pr-3">Created</th>
-                    <th className="text-right py-2">Actions</th>
+              <table className="w-full text-left text-sm">
+                <thead className="text-slate-600">
+                  <tr className="border-b border-slate-200">
+                    <th className="py-2 pr-3">Email</th>
+                    <th className="py-2 pr-3">Role</th>
+                    <th className="py-2 pr-3">Status</th>
+                    <th className="py-2 pr-3">Expires</th>
+                    <th className="py-2 pr-3">Created</th>
+                    <th className="py-2 text-right">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="text-white/90">
+
+                <tbody className="text-slate-900">
                   {items.map((inv) => {
                     const status = computeStatus(inv);
                     const rowBusy = resendingId === inv.id || revokingId === inv.id;
-
-                    // ✅ NEW: only show actions for pending invites; hide for accepted/expired/etc.
                     const showActions = status === "pending" && !permissionDenied;
 
                     return (
-                      <tr key={inv.id} className="border-b border-white/5">
-                        <td className="py-2 pr-3">{inv.email}</td>
-                        <td className="py-2 pr-3">{inv.role}</td>
-                        <td className="py-2 pr-3">{status}</td>
-                        <td className="py-2 pr-3">{formatDate(inv.expires_at)}</td>
-                        <td className="py-2 pr-3">{formatDate(inv.created_at)}</td>
-                        <td className="py-2 text-right">
+                      <tr key={inv.id} className="border-b border-slate-100">
+                        <td className="py-3 pr-3">{inv.email}</td>
+                        <td className="py-3 pr-3">{inv.role}</td>
+                        <td className="py-3 pr-3 capitalize">{status}</td>
+                        <td className="py-3 pr-3">{formatDate(inv.expires_at)}</td>
+                        <td className="py-3 pr-3">{formatDate(inv.created_at)}</td>
+                        <td className="py-3 text-right">
                           {showActions ? (
                             <div className="inline-flex gap-2">
                               <Button
@@ -289,7 +287,7 @@ export default function TenantInvitations() {
                               </Button>
                             </div>
                           ) : (
-                            <span className="text-xs text-white/50">—</span>
+                            <span className="text-xs text-slate-400">—</span>
                           )}
                         </td>
                       </tr>

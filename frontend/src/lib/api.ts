@@ -28,7 +28,7 @@ export type RequestOptions = {
   method?: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
   body?: unknown;
   headers?: Record<string, string>;
-  auth?: boolean; // default true
+  auth?: boolean;
   signal?: AbortSignal;
 };
 
@@ -53,16 +53,13 @@ function buildHeaders(opts: RequestOptions, contentType?: string): Record<string
     ...(opts.headers ?? {}),
   };
 
-  // Inject bearer token from tokenStorage when auth is enabled (PER REQUEST)
   if (auth) {
     const token = tokenStorage.get();
     if (token) headers.Authorization = `Bearer ${token}`;
   }
 
-  // Inject active tenant header when available (tenant-scoped endpoints)
   const tenantId = activeTenantStorage.get();
   if (tenantId) {
-    // MUST be UUID only (no "X-Tenant-Id: <uuid>" string)
     headers["X-Tenant-Id"] = tenantId;
   }
 
@@ -71,10 +68,7 @@ function buildHeaders(opts: RequestOptions, contentType?: string): Record<string
 
 export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   const method = opts.method ?? "GET";
-
   const headers = buildHeaders(opts, "application/json");
-
-  // Ensure leading slash
   const url = path.startsWith("/") ? path : `/${path}`;
 
   try {
@@ -107,12 +101,13 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
  * apiForm: same as api(), but sends multipart/form-data safely.
  * Important: DO NOT set Content-Type here; the browser will set the boundary.
  */
-export async function apiForm<T>(path: string, form: FormData, opts: Omit<RequestOptions, "body"> = {}): Promise<T> {
+export async function apiForm<T>(
+  path: string,
+  form: FormData,
+  opts: Omit<RequestOptions, "body"> = {}
+): Promise<T> {
   const method = opts.method ?? "POST";
-
   const headers = buildHeaders({ ...opts }, undefined);
-
-  // Ensure leading slash
   const url = path.startsWith("/") ? path : `/${path}`;
 
   try {
@@ -160,78 +155,100 @@ export const del = async <T>(path: string, opts: RequestOptions = {}): Promise<T
  * ============================================================================
  * Catalog / Products (tenant-scoped)
  * Backend paths:
- *   GET    /api/v1/catalog
- *   POST   /api/v1/catalog
- *   PATCH  /api/v1/catalog/{item_id}
- *   DELETE /api/v1/catalog/{item_id}
- *   POST   /api/v1/catalog/bulk
- *   POST   /api/v1/catalog/items/bulk-upload   (ZIP upload)
+ *   GET    /api/v1/catalog/items
+ *   POST   /api/v1/catalog/items
+ *   GET    /api/v1/catalog/items/{item_id}
+ *   PATCH  /api/v1/catalog/items/{item_id}
+ *   DELETE /api/v1/catalog/items/{item_id}
+ *   POST   /api/v1/catalog/items/bulk-upload
+ *   POST   /api/v1/catalog/items/scrape
  * ============================================================================
  */
 
 export type CatalogItem = {
   id: string;
   tenant_id: string;
-  name: string;
+  created_by_user_id?: string | null;
+  title: string;
   sku?: string | null;
-  price?: number | null;
-  currency?: string | null;
   description?: string | null;
-  image_url?: string | null;
-  is_active?: boolean;
-  created_at?: string;
-  updated_at?: string;
+  price_amount: string;
+  price_currency: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
 };
 
 export type CatalogCreateRequest = {
-  name: string;
+  title: string;
   sku?: string | null;
-  price?: number | null;
-  currency?: string | null;
   description?: string | null;
-  image_url?: string | null;
-  is_active?: boolean;
+  price_amount: number | string;
+  price_currency?: string;
 };
 
-export type CatalogUpdateRequest = Partial<CatalogCreateRequest>;
+export type CatalogUpdateRequest = {
+  title?: string;
+  sku?: string | null;
+  description?: string | null;
+  price_amount?: number | string;
+  price_currency?: string;
+  status?: string;
+};
 
-// GET /api/v1/catalog
-export async function listCatalogItems(params?: { q?: string }): Promise<CatalogItem[]> {
-  const query = params?.q ? `?q=${encodeURIComponent(params.q)}` : "";
-  return await get(`/api/v1/catalog${query}`);
+export async function listCatalogItems(): Promise<CatalogItem[]> {
+  return await get("/api/v1/catalog/items");
 }
 
-// POST /api/v1/catalog
 export async function createCatalogItem(payload: CatalogCreateRequest): Promise<CatalogItem> {
-  return await post(`/api/v1/catalog`, payload);
+  return await post("/api/v1/catalog/items", payload);
 }
 
-// PATCH /api/v1/catalog/{id}
 export async function updateCatalogItem(itemId: string, payload: CatalogUpdateRequest): Promise<CatalogItem> {
-  return await patch(`/api/v1/catalog/${encodeURIComponent(itemId)}`, payload);
+  return await patch(`/api/v1/catalog/items/${encodeURIComponent(itemId)}`, payload);
 }
 
-// DELETE /api/v1/catalog/{id}
-export async function deleteCatalogItem(itemId: string): Promise<{ ok: true }> {
-  return await del(`/api/v1/catalog/${encodeURIComponent(itemId)}`);
+export async function deleteCatalogItem(itemId: string): Promise<void> {
+  await del(`/api/v1/catalog/items/${encodeURIComponent(itemId)}`);
 }
 
-// POST /api/v1/catalog/bulk
-export async function bulkCreateCatalogItems(items: CatalogCreateRequest[]): Promise<{ created: CatalogItem[] }> {
-  return await post(`/api/v1/catalog/bulk`, items);
-}
-
-/**
- * ZIP bulk upload:
- * POST /api/v1/catalog/items/bulk-upload
- * Form field: file=<zip>
- */
 export async function bulkUploadCatalogZip(
   file: File
-): Promise<{ created: any[]; errors?: { folder: string; reason: string }[] }> {
+): Promise<{ created: CatalogItem[]; errors?: { folder: string; reason: string }[] }> {
   const form = new FormData();
   form.append("file", file);
-  return await apiForm(`/api/v1/catalog/items/bulk-upload`, form, { method: "POST" });
+  return await apiForm("/api/v1/catalog/items/bulk-upload", form, { method: "POST" });
+}
+
+export type CatalogScrapeRequest = {
+  url: string;
+  max_items?: number;
+  default_currency?: string;
+  try_woocommerce_store_api?: boolean;
+  crawl_product_pages?: boolean;
+  max_product_pages?: number;
+  try_shopify_product_json?: boolean;
+  allow_fallback?: boolean;
+  fallback_price_amount?: string | number | null;
+  fallback_price_currency?: string | null;
+};
+
+export type CatalogScrapeResponse = {
+  source_url: string;
+  created: CatalogItem[];
+  skipped: number;
+  mode_used: string;
+  discovered_product_links: number;
+  fetched_product_pages: number;
+  blocked: boolean;
+  blocked_status_code?: number | null;
+  blocked_hint?: string | null;
+};
+
+export async function scrapeCatalogItems(
+  payload: CatalogScrapeRequest
+): Promise<CatalogScrapeResponse> {
+  return await post("/api/v1/catalog/items/scrape", payload);
 }
 
 /*
@@ -248,7 +265,6 @@ export const createTenant = async <T = any>(payload: { name: string; [key: strin
   return await post<T>("/api/v1/tenants", payload);
 };
 
-// Get my membership in the currently selected tenant
 export const getMyTenantMembership = async <T = any>(): Promise<T> => {
   return await get<T>("/api/v1/tenants/membership");
 };
@@ -256,16 +272,9 @@ export const getMyTenantMembership = async <T = any>(): Promise<T> => {
 /*
  * ============================================================================
  * Tenant Invitations
- * Backend paths:
- *   GET  /api/v1/tenant-invitations
- *   POST /api/v1/tenant-invitations
- *   POST /api/v1/tenant-invitations/{invite_id}/revoke
- *   POST /api/v1/tenant-invitations/{invite_id}/resend
- *   POST /api/v1/tenant-invitations/accept
  * ============================================================================
  */
 
-// Align roles to backend enum
 export type TenantRole = "OWNER" | "ADMIN" | "MANAGER" | "STAFF";
 
 export type TenantInvitation = {
@@ -288,12 +297,10 @@ export type CreateInvitationRequest = {
   permissions?: string[];
 };
 
-// List invitations for the currently selected tenant (OWNER)
 export const listTenantInvitations = async <T = TenantInvitation[] | { items: TenantInvitation[] }>(): Promise<T> => {
   return await get<T>("/api/v1/tenant-invitations");
 };
 
-// Invite a new member to the current tenant (OWNER)
 export const inviteTenantMember = async <T = TenantInvitation>(payload: {
   email: string;
   role?: TenantRole;
@@ -302,32 +309,25 @@ export const inviteTenantMember = async <T = TenantInvitation>(payload: {
   return await post<T>("/api/v1/tenant-invitations", payload);
 };
 
-// Strongly-typed alias (same endpoint as inviteTenantMember)
 export const createTenantInvitation = async (payload: CreateInvitationRequest): Promise<TenantInvitation> => {
   return await post<TenantInvitation>("/api/v1/tenant-invitations", payload);
 };
 
-// Revoke invitation (Swagger uses POST, not DELETE)
 export const revokeTenantInvitation = async (inviteId: string): Promise<void> => {
   await post(`/api/v1/tenant-invitations/${inviteId}/revoke`);
 };
 
-// Resend invitation (Swagger uses POST)
 export const resendTenantInvitation = async (inviteId: string): Promise<void> => {
   await post(`/api/v1/tenant-invitations/${inviteId}/resend`);
 };
 
-// Accept invitation (token-based) — sends accept_tos
 export const acceptTenantInvitation = async (token: string): Promise<void> => {
   await post(`/api/v1/tenant-invitations/accept`, { token, accept_tos: true });
 };
 
 /*
  * ============================================================================
- * Tenant Members (tenant-scoped) — list + manage (OWNER/ADMIN)
- * Backend paths:
- *   GET   /api/v1/tenants/members
- *   PATCH /api/v1/tenants/members/{member_user_id}
+ * Tenant Members
  * ============================================================================
  */
 
@@ -358,7 +358,6 @@ export async function updateTenantMember(memberUserId: string, payload: UpdateTe
   });
 }
 
-// Back-compat alias: older code may import getTenantMembers.
 export const getTenantMembers = async <T = TenantMember[]>(): Promise<T> => {
   return (await listTenantMembers()) as unknown as T;
 };

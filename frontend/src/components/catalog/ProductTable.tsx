@@ -3,19 +3,29 @@ import React from "react";
 import type { CatalogItem } from "../../lib/api";
 import { Button } from "../Button";
 
-function formatMoney(value?: number | null, currency?: string | null) {
-  if (value == null) return "—";
+function formatMoney(value?: string | number | null, currency?: string | null) {
+  if (value == null || value === "") return "—";
 
   const resolvedCurrency = currency || "KES";
+  const amount = typeof value === "number" ? value : Number(value);
+
+  if (!Number.isFinite(amount)) {
+    return `${resolvedCurrency} ${value}`;
+  }
 
   try {
     return new Intl.NumberFormat(undefined, {
       style: "currency",
       currency: resolvedCurrency,
-    }).format(value);
+    }).format(amount);
   } catch {
-    return `${resolvedCurrency} ${value}`;
+    return `${resolvedCurrency} ${amount}`;
   }
+}
+
+function formatStatus(status?: string | null) {
+  if (!status) return "Active";
+  return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
 type ProductTableProps = {
@@ -37,7 +47,7 @@ export function ProductTable({
     return (
       <div className="rounded-2xl border border-black/10 bg-white p-8 text-sm">
         <div className="font-medium">No products yet</div>
-        <div className="mt-1 opacity-70">Create your first product or use bulk upload.</div>
+        <div className="mt-1 opacity-70">Create your first product, import from URL, or use bulk upload.</div>
       </div>
     );
   }
@@ -61,18 +71,10 @@ export function ProductTable({
               <tr key={item.id} className="border-t border-black/5 align-top">
                 <td className="px-4 py-3">
                   <div className="flex items-start gap-3">
-                    <div className="h-12 w-12 shrink-0 overflow-hidden rounded-xl border border-black/10 bg-black/[0.03]">
-                      {item.image_url ? (
-                        <img
-                          src={item.image_url}
-                          alt={item.name}
-                          className="h-full w-full object-cover"
-                        />
-                      ) : null}
-                    </div>
+                    <div className="h-12 w-12 shrink-0 overflow-hidden rounded-xl border border-black/10 bg-black/[0.03]" />
 
                     <div className="min-w-0">
-                      <div className="font-medium">{item.name}</div>
+                      <div className="font-medium">{item.title}</div>
                       {item.description ? (
                         <div className="mt-0.5 line-clamp-2 text-xs opacity-70">{item.description}</div>
                       ) : (
@@ -83,10 +85,10 @@ export function ProductTable({
                 </td>
 
                 <td className="px-4 py-3">{item.sku || "—"}</td>
-                <td className="px-4 py-3">{formatMoney(item.price, item.currency)}</td>
+                <td className="px-4 py-3">{formatMoney(item.price_amount, item.price_currency)}</td>
                 <td className="px-4 py-3">
                   <span className="rounded-full bg-black/[0.05] px-2 py-1 text-xs">
-                    {item.is_active === false ? "Inactive" : "Active"}
+                    {formatStatus(item.status)}
                   </span>
                 </td>
                 <td className="px-4 py-3">
