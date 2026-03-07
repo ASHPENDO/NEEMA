@@ -152,12 +152,35 @@ def _iter_products_from_jsonld(data: Any) -> List[Dict[str, Any]]:
     return products
 
 
+def _extract_image_url(value: Any) -> Optional[str]:
+    if isinstance(value, str):
+        value = value.strip()
+        return value or None
+
+    if isinstance(value, list):
+        for item in value:
+            candidate = _extract_image_url(item)
+            if candidate:
+                return candidate
+        return None
+
+    if isinstance(value, dict):
+        for key in ("url", "contentUrl", "thumbnailUrl"):
+            candidate = value.get(key)
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate.strip()
+        return None
+
+    return None
+
+
 def _extract_product_fields(
     prod: Dict[str, Any],
-) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[Decimal], Optional[str]]:
+) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str], Optional[Decimal], Optional[str]]:
     title = prod.get("name") or prod.get("title")
     description = prod.get("description")
     sku = prod.get("sku") or prod.get("mpn")
+    image_url = _extract_image_url(prod.get("image"))
 
     price_amount: Optional[Decimal] = None
     price_currency: Optional[str] = None
@@ -201,13 +224,18 @@ def _extract_product_fields(
     else:
         sku = None
 
+    if isinstance(image_url, str):
+        image_url = image_url.strip() or None
+    else:
+        image_url = None
+
     if isinstance(price_currency, str):
         price_currency = price_currency.strip()
 
-    return title, description, sku, price_amount, price_currency
+    return title, description, sku, image_url, price_amount, price_currency
 
 
-def _extract_og_fallback(html: str) -> Tuple[Optional[str], Optional[str]]:
+def _extract_og_fallback(html: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     def meta(property_name: str) -> Optional[str]:
         m = re.search(
             rf'<meta[^>]+property=["\']{re.escape(property_name)}["\'][^>]+content=["\'](.*?)["\']',
@@ -232,7 +260,8 @@ def _extract_og_fallback(html: str) -> Tuple[Optional[str], Optional[str]]:
 
     ogt = meta("og:title")
     ogd = meta("og:description") or meta_name("description")
-    return ogt, ogd
+    ogi = meta("og:image")
+    return ogt, ogd, ogi
 
 
 def _strip_tags(s: str) -> str:
@@ -430,6 +459,7 @@ def _parse_homelink_list_page(html: str, base_url: str, limit: int) -> List[Dict
                 "name": title,
                 "description": None,
                 "sku": None,
+                "image_url": None,
                 "price_amount": price_amount,
                 "price_currency": "KES",
             }
@@ -438,11 +468,13 @@ def _parse_homelink_list_page(html: str, base_url: str, limit: int) -> List[Dict
     return items
 
 
-def _parse_product_page_fallback(html: str) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[Decimal]]:
+def _parse_product_page_fallback(
+    html: str,
+) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str], Optional[Decimal]]:
     h1 = re.search(r"<h1[^>]*>(.*?)</h1>", html, flags=re.IGNORECASE | re.DOTALL)
     title = _strip_tags(h1.group(1)) if h1 else None
 
-    og_title, og_desc = _extract_og_fallback(html)
+    og_title, og_desc, og_image = _extract_og_fallback(html)
     if not title:
         title = og_title
 
@@ -465,7 +497,7 @@ def _parse_product_page_fallback(html: str) -> Tuple[Optional[str], Optional[str
                 desc = t
                 break
 
-    return title, desc, sku, price_amount
+    return title, desc, sku, og_image, price_amount
 
 
 async def _try_woocommerce_store_api(client: httpx.AsyncClient, root: str, max_items: int) -> List[Dict[str, Any]]:
@@ -499,11 +531,25 @@ async def _try_woocommerce_store_api(client: httpx.AsyncClient, root: str, max_i
         if price_amount is None or price_amount <= 0:
             continue
 
+        image_url = None
+        images = item.get("images")
+        if isinstance(images, list) and images:
+            first = images[0]
+            if isinstance(first, dict):
+                image_url = (
+                    first.get("src")
+                    or first.get("thumbnail")
+                    or first.get("srcset")
+                )
+                if isinstance(image_url, str):
+                    image_url = image_url.strip() or None
+
         out.append(
             {
                 "name": name.strip(),
                 "description": item.get("short_description") or item.get("description"),
                 "sku": item.get("sku"),
+                "image_url": image_url,
                 "price_amount": price_amount,
                 "price_currency": (currency or "KES"),
             }
@@ -554,10 +600,20 @@ async def _try_shopify_product_json(client: httpx.AsyncClient, product_url: str)
             sku = v.get("sku").strip()
             break
 
+    image_url = None
+    featured_image = data.get("featured_image")
+    if isinstance(featured_image, str) and featured_image.strip():
+        image_url = featured_image.strip()
+    elif isinstance(data.get("images"), list) and data["images"]:
+        first = data["images"][0]
+        if isinstance(first, str) and first.strip():
+            image_url = first.strip()
+
     return {
         "name": title.strip(),
         "description": data.get("description"),
         "sku": sku,
+        "image_url": image_url,
         "price_amount": price_amount,
         "price_currency": "KES",
     }
@@ -568,6 +624,7 @@ def _make_item(
     title: str,
     description: Optional[str],
     sku: Optional[str],
+    image_url: Optional[str],
     price_amount: Decimal,
     price_currency: str,
 ) -> CatalogItem:
@@ -578,6 +635,7 @@ def _make_item(
         title=title,
         sku=sku,
         description=description,
+        image_url=image_url,
         price_amount=price_amount,
         price_currency=price_currency,
         status="active",
@@ -598,7 +656,7 @@ def _ingest_products_dicts(
     for prod in product_dicts:
         if len(created) >= max_items:
             break
-        title, description, sku, price_amount, price_currency = _extract_product_fields(prod)
+        title, description, sku, image_url, price_amount, price_currency = _extract_product_fields(prod)
         if not price_currency:
             price_currency = default_currency
         if not title or not price_amount or price_amount <= 0:
@@ -609,6 +667,7 @@ def _ingest_products_dicts(
             title=title,
             description=description,
             sku=sku,
+            image_url=image_url,
             price_amount=price_amount,
             price_currency=price_currency,
         )
@@ -649,6 +708,7 @@ async def create_catalog_item(
         title=payload.title,
         description=payload.description,
         sku=payload.sku,
+        image_url=payload.image_url,
         price_amount=payload.price_amount,
         price_currency=payload.price_currency,
     )
@@ -693,7 +753,7 @@ async def update_catalog_item(
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
 
-    for field, value in payload.dict(exclude_unset=True).items():
+    for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(item, field, value)
 
     await db.commit()
@@ -764,6 +824,7 @@ async def scrape_catalog_items(
                             title=title,
                             description=p.get("description"),
                             sku=p.get("sku"),
+                            image_url=p.get("image_url"),
                             price_amount=price_amount,
                             price_currency=str(price_currency),
                         )
@@ -825,6 +886,7 @@ async def scrape_catalog_items(
                             title=title,
                             description=None,
                             sku=None,
+                            image_url=p.get("image_url"),
                             price_amount=price_amount,
                             price_currency=payload.default_currency,
                         )
@@ -880,6 +942,7 @@ async def scrape_catalog_items(
                                     title=title,
                                     description=shopify_p.get("description"),
                                     sku=shopify_p.get("sku"),
+                                    image_url=shopify_p.get("image_url"),
                                     price_amount=price_amount,
                                     price_currency=payload.default_currency,
                                 )
@@ -888,13 +951,14 @@ async def scrape_catalog_items(
                                 ingested_this_page = True
 
                     if (not ingested_this_page) and payload.allow_fallback:
-                        t, d, sku, pa = _parse_product_page_fallback(p_html)
+                        t, d, sku, image_url, pa = _parse_product_page_fallback(p_html)
                         if t and pa and pa > 0:
                             item = _make_item(
                                 membership=membership,
                                 title=t.strip(),
                                 description=d,
                                 sku=sku,
+                                image_url=image_url,
                                 price_amount=pa,
                                 price_currency=payload.default_currency,
                             )
@@ -907,13 +971,14 @@ async def scrape_catalog_items(
 
             # 5) Last-resort fallback from OG + provided fallback price
             if not created and payload.allow_fallback:
-                og_title, og_desc = _extract_og_fallback(html)
+                og_title, og_desc, og_image = _extract_og_fallback(html)
                 if og_title and payload.fallback_price_amount and payload.fallback_price_amount > 0:
                     item = _make_item(
                         membership=membership,
                         title=og_title.strip(),
                         description=og_desc,
                         sku=None,
+                        image_url=og_image,
                         price_amount=payload.fallback_price_amount,
                         price_currency=(payload.fallback_price_currency or payload.default_currency),
                     )

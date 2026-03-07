@@ -19,6 +19,7 @@ class CatalogItem(Base):
     title = Column(String(255), nullable=False)
     sku = Column(String(128), nullable=True)
     description = Column(Text, nullable=True)
+    image_url = Column(String(2048), nullable=True)
 
     price_amount = Column(Numeric(12, 2), nullable=False)
     price_currency = Column(String(8), nullable=False, default="KES")

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import uuid
 import zipfile
@@ -18,6 +19,8 @@ from app.api.deps.tenant import get_current_membership
 from app.db.session import get_db
 from app.models.catalog_item import CatalogItem
 from app.schemas.catalog import CatalogItemResponse
+from app.services.media.image_optimizer import optimize_image
+from app.services.storage.registry import get_storage_adapter
 
 router = APIRouter()
 
@@ -79,7 +82,6 @@ def _normalize_tags(value: Any) -> List[str]:
                 out.append(s)
         return out
     if isinstance(value, str):
-        # supports comma-separated tags
         parts = [x.strip() for x in value.split(",")]
         return [x for x in parts if x]
     return []
@@ -116,6 +118,154 @@ def _list_media_files(folder_path: str) -> List[Dict[str, Any]]:
         )
 
     return items
+
+
+def _slugify(value: str) -> str:
+    value = value.strip().lower()
+    value = re.sub(r"[^a-z0-9]+", "-", value)
+    value = re.sub(r"-{2,}", "-", value)
+    return value.strip("-") or "item"
+
+
+def _pick_primary_local_image_filename(media_files: List[Dict[str, Any]]) -> Optional[str]:
+    for media in media_files:
+        if media.get("kind") == "image" and media.get("filename"):
+            return str(media["filename"]).strip() or None
+    return None
+
+
+def _build_storage_key(
+    *,
+    tenant_id: Any,
+    folder_label: str,
+    title: str,
+    item_id: uuid.UUID,
+    ext: str,
+) -> str:
+    tenant_part = str(tenant_id)
+    folder_part = _slugify(folder_label)
+    title_part = _slugify(title)
+    return f"catalog/{tenant_part}/{folder_part}/{title_part}-{item_id}.{ext}"
+
+
+def _process_and_upload_primary_image(
+    *,
+    storage: Any,
+    tenant_id: Any,
+    folder_label: str,
+    title: str,
+    item_id: uuid.UUID,
+    folder_path: str,
+    details_image_url: Optional[str],
+    media_files: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """
+    Priority:
+    1. If details.json provides image_url, keep it as-is.
+    2. Otherwise, take the first local image, optimize it, upload JPEG (+ optional WebP),
+       and return the public URL.
+    """
+    if details_image_url:
+        return {
+            "image_url": details_image_url,
+            "primary_image": details_image_url,
+            "image_source": "details_image_url",
+            "image_uploaded": False,
+            "image_skipped": False,
+            "uploaded_assets": [],
+            "skipped_reason": None,
+        }
+
+    primary_filename = _pick_primary_local_image_filename(media_files)
+    if not primary_filename:
+        return {
+            "image_url": None,
+            "primary_image": None,
+            "image_source": None,
+            "image_uploaded": False,
+            "image_skipped": True,
+            "uploaded_assets": [],
+            "skipped_reason": "No local image file found in product folder.",
+        }
+
+    image_path = os.path.join(folder_path, primary_filename)
+    if not os.path.isfile(image_path):
+        return {
+            "image_url": None,
+            "primary_image": primary_filename,
+            "image_source": "zip_file",
+            "image_uploaded": False,
+            "image_skipped": True,
+            "uploaded_assets": [],
+            "skipped_reason": f"Primary image file not found: {primary_filename}",
+        }
+
+    with open(image_path, "rb") as f:
+        original_bytes = f.read()
+
+    optimized = optimize_image(original_bytes)
+
+    jpeg_key = _build_storage_key(
+        tenant_id=tenant_id,
+        folder_label=folder_label,
+        title=title,
+        item_id=item_id,
+        ext="jpg",
+    )
+    jpeg_upload = storage.upload_bytes(
+        key=jpeg_key,
+        content=optimized.jpeg_bytes,
+        content_type=optimized.jpeg_content_type,
+        make_public=True,
+    )
+
+    uploaded_assets = [
+        {
+            "variant": "jpeg",
+            "key": jpeg_upload.key,
+            "url": jpeg_upload.public_url,
+            "content_type": jpeg_upload.content_type,
+            "size_bytes": jpeg_upload.size_bytes,
+            "width": optimized.width,
+            "height": optimized.height,
+        }
+    ]
+
+    if optimized.webp_bytes and optimized.webp_content_type:
+        webp_key = _build_storage_key(
+            tenant_id=tenant_id,
+            folder_label=folder_label,
+            title=title,
+            item_id=item_id,
+            ext="webp",
+        )
+        webp_upload = storage.upload_bytes(
+            key=webp_key,
+            content=optimized.webp_bytes,
+            content_type=optimized.webp_content_type,
+            make_public=True,
+        )
+        uploaded_assets.append(
+            {
+                "variant": "webp",
+                "key": webp_upload.key,
+                "url": webp_upload.public_url,
+                "content_type": webp_upload.content_type,
+                "size_bytes": webp_upload.size_bytes,
+                "width": optimized.width,
+                "height": optimized.height,
+            }
+        )
+
+    return {
+        "image_url": jpeg_upload.public_url,
+        "primary_image": primary_filename,
+        "image_source": "optimized_upload",
+        "image_uploaded": True,
+        "image_skipped": False,
+        "uploaded_assets": uploaded_assets,
+        "skipped_reason": None,
+    }
 
 
 def _build_social_caption_seed(
@@ -169,20 +319,23 @@ def _build_social_caption_seed(
 def _make_item(
     *,
     membership: Any,
+    item_id: uuid.UUID,
     title: str,
     sku: Optional[str],
     description: Optional[str],
+    image_url: Optional[str],
     price_amount: Decimal,
     price_currency: str,
     status_value: str,
 ) -> CatalogItem:
     return CatalogItem(
-        id=uuid.uuid4(),
+        id=item_id,
         tenant_id=membership.tenant_id,
         created_by_user_id=getattr(membership, "user_id", None),
         title=title,
         sku=sku,
         description=description,
+        image_url=image_url,
         price_amount=price_amount,
         price_currency=price_currency,
         status=status_value,
@@ -194,7 +347,6 @@ def _safe_extract_zip(zip_path: str, extract_to: str) -> None:
         for member in zf.infolist():
             member_name = member.filename
 
-            # skip macOS zip noise
             if member_name.startswith("__MACOSX/") or member_name.endswith(".DS_Store"):
                 continue
 
@@ -206,17 +358,6 @@ def _safe_extract_zip(zip_path: str, extract_to: str) -> None:
 
 
 def _find_product_dirs(root_dir: str) -> List[Tuple[str, str]]:
-    """
-    Returns list of:
-      (folder_label, folder_path)
-    where folder_path contains details.json.
-    Supports:
-      ZIP/
-        PHONES/
-          tecno1/details.json
-          tecno2/details.json
-    and also flatter variants.
-    """
     found: List[Tuple[str, str]] = []
 
     for current_root, _, files in os.walk(root_dir):
@@ -224,7 +365,6 @@ def _find_product_dirs(root_dir: str) -> List[Tuple[str, str]]:
             folder_label = os.path.basename(current_root.rstrip(os.sep)) or current_root
             found.append((folder_label, current_root))
 
-    # Avoid treating temp root itself as a product dir if someone places details.json there unexpectedly
     found = [(label, path) for (label, path) in found if os.path.abspath(path) != os.path.abspath(root_dir)]
     found.sort(key=lambda x: x[0].lower())
     return found
@@ -243,6 +383,10 @@ def _validate_details_json(data: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError("sku exceeds 128 characters")
 
     description = _normalize_str(data.get("description"))
+    image_url = _normalize_str(data.get("image_url"))
+    if image_url and len(image_url) > 2048:
+        raise ValueError("image_url exceeds 2048 characters")
+
     price_amount = _coerce_decimal(data.get("price_amount", data.get("price")))
     if price_amount is None or price_amount <= 0:
         raise ValueError("price_amount must be a positive number")
@@ -270,6 +414,7 @@ def _validate_details_json(data: Dict[str, Any]) -> Dict[str, Any]:
         "title": title,
         "sku": sku,
         "description": description,
+        "image_url": image_url,
         "price_amount": price_amount,
         "price_currency": price_currency,
         "status": status_value,
@@ -295,46 +440,28 @@ async def bulk_upload_catalog_zip(
     _=Depends(require_permissions("catalog:create")),
 ):
     """
-    Accepts a ZIP file with this preferred structure:
+    Accepts a ZIP file with product folders containing:
+      - details.json
+      - optional image/video files
 
-    PHONES.zip
-    └── PHONES/
-        ├── tecno1/
-        │   ├── details.json
-        │   ├── image1.jpg
-        │   └── video1.mp4
-        ├── tecno2/
-        │   ├── details.json
-        │   └── image1.png
-        └── tecno3/
-            ├── details.json
-            └── image1.webp
-
-    Required details.json fields:
-      - title (or name)
-      - price_amount (or price)
-
-    Optional:
-      - sku
-      - description
-      - price_currency (or currency)
-      - status
-      - category
-      - condition
-      - brand
-      - tags
-      - social_hook
-      - social_cta
-      - social_caption
+    Image behavior:
+      - If details.json.image_url is provided, it is used as-is.
+      - Otherwise the first local image is optimized and uploaded via the
+        configured storage adapter, and the public URL is saved to image_url.
     """
 
     if not file.filename or not file.filename.lower().endswith(".zip"):
         raise HTTPException(status_code=400, detail="Only .zip files are supported")
 
+    storage = get_storage_adapter()
+
     created_items: List[CatalogItem] = []
     created_payloads: List[Dict[str, Any]] = []
     errors: List[Dict[str, str]] = []
+    notifications: List[Dict[str, Any]] = []
     processed_count = 0
+    uploaded_images_count = 0
+    skipped_images_count = 0
 
     with TemporaryDirectory() as tmp:
         zip_path = os.path.join(tmp, "upload.zip")
@@ -374,11 +501,49 @@ async def bulk_upload_catalog_zip(
                 data = _validate_details_json(raw_data)
                 media_files = _list_media_files(folder_path)
 
+                item_id = uuid.uuid4()
+
+                image_result = _process_and_upload_primary_image(
+                    storage=storage,
+                    tenant_id=membership.tenant_id,
+                    folder_label=folder_label,
+                    title=data["title"],
+                    item_id=item_id,
+                    folder_path=folder_path,
+                    details_image_url=data["image_url"],
+                    media_files=media_files,
+                )
+
+                if image_result["image_uploaded"]:
+                    uploaded_images_count += 1
+                    notifications.append(
+                        {
+                            "folder": folder_label,
+                            "type": "image_uploaded",
+                            "message": f"Primary image uploaded successfully for {data['title']}.",
+                            "image_source": image_result["image_source"],
+                            "image_url": image_result["image_url"],
+                        }
+                    )
+                elif image_result["image_skipped"]:
+                    skipped_images_count += 1
+                    notifications.append(
+                        {
+                            "folder": folder_label,
+                            "type": "image_skipped",
+                            "message": image_result["skipped_reason"] or f"Primary image skipped for {data['title']}.",
+                            "image_source": image_result["image_source"],
+                            "image_url": image_result["image_url"],
+                        }
+                    )
+
                 item = _make_item(
                     membership=membership,
+                    item_id=item_id,
                     title=data["title"],
                     sku=data["sku"],
                     description=data["description"],
+                    image_url=image_result["image_url"],
                     price_amount=data["price_amount"],
                     price_currency=data["price_currency"],
                     status_value=data["status"],
@@ -401,11 +566,14 @@ async def bulk_upload_catalog_zip(
                 created_payloads.append(
                     {
                         "folder": folder_label,
-                        "db_item_ref": item,  # temp placeholder; replaced after refresh
+                        "db_item_ref": item,
                         "category": data["category"],
                         "condition": data["condition"],
                         "brand": data["brand"],
                         "tags": data["tags"],
+                        "primary_image": image_result["primary_image"],
+                        "image_source": image_result["image_source"],
+                        "uploaded_assets": image_result["uploaded_assets"],
                         "media_files": media_files,
                         "image_count": sum(1 for m in media_files if m["kind"] == "image"),
                         "video_count": sum(1 for m in media_files if m["kind"] == "video"),
@@ -422,6 +590,13 @@ async def bulk_upload_catalog_zip(
                     {
                         "folder": folder_label,
                         "reason": str(e),
+                    }
+                )
+                notifications.append(
+                    {
+                        "folder": folder_label,
+                        "type": "product_skipped",
+                        "message": str(e),
                     }
                 )
 
@@ -451,14 +626,19 @@ async def bulk_upload_catalog_zip(
 
     return {
         "filename": file.filename,
+        "storage_provider": getattr(storage, "provider_name", "unknown"),
         "processed_product_folders": processed_count,
         "created_count": len(final_created),
         "error_count": len(errors),
+        "uploaded_images_count": uploaded_images_count,
+        "skipped_images_count": skipped_images_count,
         "created": final_created,
         "errors": errors,
+        "notifications": notifications,
         "notes": [
             "Catalog items were created successfully.",
-            "Media files were detected for future storage/publishing modules.",
-            "Images/videos are not yet persisted to object storage in this endpoint.",
+            "Primary local images are now optimized before upload when present.",
+            "Public image URLs are saved to image_url through the configured storage adapter.",
+            "If details.json.image_url is provided, it is preserved as-is.",
         ],
     }

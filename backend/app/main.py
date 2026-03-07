@@ -1,7 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
-from app.core.config import settings  # noqa: F401
+from app.core.config import settings
 import app.models  # noqa: F401  # force model registration
 
 from app.api.v1.auth import router as auth_router
@@ -16,19 +17,15 @@ from app.api.v1.catalog import router as catalog_router
 def create_application() -> FastAPI:
     app = FastAPI(title="POSTIKA API")
 
-    # ✅ CORS Configuration (Dev + Production + Codespaces)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
-            # 🔹 Local development (Vite frontend)
             "http://localhost:5173",
             "http://127.0.0.1:5173",
-            # 🔹 Production domains
             "https://postika.co.ke",
             "https://www.postika.co.ke",
             "https://api.postika.co.ke",
         ],
-        # 🔹 GitHub Codespaces / *.app.github.dev domains
         allow_origin_regex=r"^https:\/\/.*\.app\.github\.dev$",
         allow_credentials=True,
         allow_methods=["*"],
@@ -39,14 +36,13 @@ def create_application() -> FastAPI:
     def root():
         return {"status": "ok", "service": "postika"}
 
-    # Routers
+    # Local dev/public media serving
+    if settings.STORAGE_PROVIDER_NORMALIZED == "local":
+        app.mount(settings.MEDIA_URL, StaticFiles(directory=settings.MEDIA_ROOT), name="media")
+
     app.include_router(auth_router, prefix="/api/v1")
     app.include_router(tenants_router, prefix="/api/v1")
-
-    # ✅ Tenant Invitations (FIX: ensure this is mounted)
     app.include_router(tenant_invitations_router, prefix="/api/v1")
-
-    # Platform / Sales / Catalog
     app.include_router(platform_invitations_router, prefix="/api/v1")
     app.include_router(sales_router, prefix="/api/v1")
     app.include_router(platform_sales_router, prefix="/api/v1")

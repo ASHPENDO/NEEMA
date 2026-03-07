@@ -17,6 +17,7 @@ class CatalogItemBase(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
     sku: Optional[str] = Field(None, max_length=128)
     description: Optional[str] = None
+    image_url: Optional[str] = Field(None, max_length=2048)
 
     price_amount: Decimal = Field(..., gt=0)
     price_currency: str = Field(default="KES", min_length=1, max_length=8)
@@ -30,6 +31,7 @@ class CatalogItemUpdate(BaseModel):
     title: Optional[str] = Field(None, min_length=1, max_length=255)
     sku: Optional[str] = Field(None, max_length=128)
     description: Optional[str] = None
+    image_url: Optional[str] = Field(None, max_length=2048)
 
     price_amount: Optional[Decimal] = Field(None, gt=0)
     price_currency: Optional[str] = Field(None, min_length=1, max_length=8)
