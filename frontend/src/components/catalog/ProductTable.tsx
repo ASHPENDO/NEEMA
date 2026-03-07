@@ -1,5 +1,5 @@
 // src/components/catalog/ProductTable.tsx
-import React from "react";
+import React, { useState } from "react";
 import type { CatalogItem } from "../../lib/api";
 import { Button } from "../Button";
 
@@ -68,48 +68,90 @@ export function ProductTable({
 
           <tbody>
             {items.map((item) => (
-              <tr key={item.id} className="border-t border-black/5 align-top">
-                <td className="px-4 py-3">
-                  <div className="flex items-start gap-3">
-                    <div className="h-12 w-12 shrink-0 overflow-hidden rounded-xl border border-black/10 bg-black/[0.03]" />
-
-                    <div className="min-w-0">
-                      <div className="font-medium">{item.title}</div>
-                      {item.description ? (
-                        <div className="mt-0.5 line-clamp-2 text-xs opacity-70">{item.description}</div>
-                      ) : (
-                        <div className="mt-0.5 text-xs opacity-50">No description</div>
-                      )}
-                    </div>
-                  </div>
-                </td>
-
-                <td className="px-4 py-3">{item.sku || "—"}</td>
-                <td className="px-4 py-3">{formatMoney(item.price_amount, item.price_currency)}</td>
-                <td className="px-4 py-3">
-                  <span className="rounded-full bg-black/[0.05] px-2 py-1 text-xs">
-                    {formatStatus(item.status)}
-                  </span>
-                </td>
-                <td className="px-4 py-3">
-                  <div className="flex justify-end gap-2">
-                    {canWrite && (
-                      <Button variant="secondary" onClick={() => onEdit(item)}>
-                        Edit
-                      </Button>
-                    )}
-                    {canDelete && (
-                      <Button variant="danger" onClick={() => onDelete(item)}>
-                        Delete
-                      </Button>
-                    )}
-                  </div>
-                </td>
-              </tr>
+              <ProductRow
+                key={item.id}
+                item={item}
+                canWrite={canWrite}
+                canDelete={canDelete}
+                onEdit={onEdit}
+                onDelete={onDelete}
+              />
             ))}
           </tbody>
         </table>
       </div>
     </div>
+  );
+}
+
+function ProductRow({
+  item,
+  canWrite,
+  canDelete,
+  onEdit,
+  onDelete,
+}: {
+  item: CatalogItem;
+  canWrite: boolean;
+  canDelete: boolean;
+  onEdit: (item: CatalogItem) => void;
+  onDelete: (item: CatalogItem) => void;
+}) {
+  const [imageFailed, setImageFailed] = useState(false);
+  const hasImage = Boolean(item.image_url && !imageFailed);
+
+  return (
+    <tr className="border-t border-black/5 align-top">
+      <td className="px-4 py-3">
+        <div className="flex items-start gap-3">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-black/10 bg-black/[0.03]">
+            {hasImage ? (
+              <img
+                src={item.image_url ?? undefined}
+                alt={item.title}
+                className="h-full w-full object-cover"
+                loading="lazy"
+                onError={() => setImageFailed(true)}
+              />
+            ) : (
+              <span className="text-[10px] font-medium uppercase tracking-wide opacity-45">
+                No image
+              </span>
+            )}
+          </div>
+
+          <div className="min-w-0">
+            <div className="font-medium">{item.title}</div>
+            {item.description ? (
+              <div className="mt-0.5 line-clamp-2 text-xs opacity-70">{item.description}</div>
+            ) : (
+              <div className="mt-0.5 text-xs opacity-50">No description</div>
+            )}
+          </div>
+        </div>
+      </td>
+
+      <td className="px-4 py-3">{item.sku || "—"}</td>
+      <td className="px-4 py-3">{formatMoney(item.price_amount, item.price_currency)}</td>
+      <td className="px-4 py-3">
+        <span className="rounded-full bg-black/[0.05] px-2 py-1 text-xs">
+          {formatStatus(item.status)}
+        </span>
+      </td>
+      <td className="px-4 py-3">
+        <div className="flex justify-end gap-2">
+          {canWrite && (
+            <Button variant="secondary" onClick={() => onEdit(item)}>
+              Edit
+            </Button>
+          )}
+          {canDelete && (
+            <Button variant="danger" onClick={() => onDelete(item)}>
+              Delete
+            </Button>
+          )}
+        </div>
+      </td>
+    </tr>
   );
 }

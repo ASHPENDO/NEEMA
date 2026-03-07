@@ -66,7 +66,8 @@ export default function Catalog() {
     if (!search) return items;
 
     return items.filter((item) => {
-      const haystack = `${item.title ?? ""} ${item.sku ?? ""} ${item.description ?? ""}`.toLowerCase();
+      const haystack =
+        `${item.title ?? ""} ${item.sku ?? ""} ${item.description ?? ""}`.toLowerCase();
       return haystack.includes(search);
     });
   }, [items, q]);

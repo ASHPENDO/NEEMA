@@ -172,6 +172,7 @@ export type CatalogItem = {
   title: string;
   sku?: string | null;
   description?: string | null;
+  image_url?: string | null;
   price_amount: string;
   price_currency: string;
   status: string;
@@ -183,6 +184,7 @@ export type CatalogCreateRequest = {
   title: string;
   sku?: string | null;
   description?: string | null;
+  image_url?: string | null;
   price_amount: number | string;
   price_currency?: string;
 };
@@ -191,9 +193,43 @@ export type CatalogUpdateRequest = {
   title?: string;
   sku?: string | null;
   description?: string | null;
+  image_url?: string | null;
   price_amount?: number | string;
   price_currency?: string;
   status?: string;
+};
+
+export type BulkUploadCatalogCreatedEntry = {
+  item: CatalogItem;
+  folder: string;
+  category?: string | null;
+  condition?: string | null;
+  brand?: string | null;
+  tags?: string[];
+  primary_image?: string | null;
+  media_files?: {
+    filename: string;
+    kind: "image" | "video";
+    sort_order: number;
+    is_primary: boolean;
+  }[];
+  image_count?: number;
+  video_count?: number;
+  social_posting?: {
+    caption_seed?: string;
+    social_hook?: string | null;
+    social_cta?: string | null;
+  };
+};
+
+export type BulkUploadCatalogResponse = {
+  filename: string;
+  processed_product_folders: number;
+  created_count: number;
+  error_count: number;
+  created: BulkUploadCatalogCreatedEntry[];
+  errors?: { folder: string; reason: string }[];
+  notes?: string[];
 };
 
 export async function listCatalogItems(): Promise<CatalogItem[]> {
@@ -212,9 +248,7 @@ export async function deleteCatalogItem(itemId: string): Promise<void> {
   await del(`/api/v1/catalog/items/${encodeURIComponent(itemId)}`);
 }
 
-export async function bulkUploadCatalogZip(
-  file: File
-): Promise<{ created: CatalogItem[]; errors?: { folder: string; reason: string }[] }> {
+export async function bulkUploadCatalogZip(file: File): Promise<BulkUploadCatalogResponse> {
   const form = new FormData();
   form.append("file", file);
   return await apiForm("/api/v1/catalog/items/bulk-upload", form, { method: "POST" });

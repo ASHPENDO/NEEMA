@@ -27,6 +27,7 @@ export function ProductFormModal({
 
   const [title, setTitle] = useState("");
   const [sku, setSku] = useState("");
+  const [imageUrl, setImageUrl] = useState("");
   const [priceAmount, setPriceAmount] = useState("");
   const [priceCurrency, setPriceCurrency] = useState("KES");
   const [description, setDescription] = useState("");
@@ -38,6 +39,7 @@ export function ProductFormModal({
     if (initial) {
       setTitle(initial.title ?? "");
       setSku(initial.sku ?? "");
+      setImageUrl(initial.image_url ?? "");
       setPriceAmount(initial.price_amount == null ? "" : String(initial.price_amount));
       setPriceCurrency(initial.price_currency ?? "KES");
       setDescription(initial.description ?? "");
@@ -47,6 +49,7 @@ export function ProductFormModal({
 
     setTitle("");
     setSku("");
+    setImageUrl("");
     setPriceAmount("");
     setPriceCurrency("KES");
     setDescription("");
@@ -61,6 +64,11 @@ export function ProductFormModal({
 
   const isPriceValid = Number.isFinite(numericPrice) && numericPrice > 0;
 
+  const normalizedImageUrl = useMemo(() => {
+    const value = imageUrl.trim();
+    return value ? value : null;
+  }, [imageUrl]);
+
   if (!open) return null;
 
   async function handleSubmit() {
@@ -72,6 +80,7 @@ export function ProductFormModal({
         title: title.trim(),
         sku: sku.trim() || null,
         description: description.trim() || null,
+        image_url: normalizedImageUrl,
         price_amount: Number(priceAmount),
         price_currency: priceCurrency.trim() || "KES",
       };
@@ -84,6 +93,7 @@ export function ProductFormModal({
       title: title.trim(),
       sku: sku.trim() || null,
       description: description.trim() || null,
+      image_url: normalizedImageUrl,
       price_amount: Number(priceAmount),
       price_currency: priceCurrency.trim() || "KES",
       status,
@@ -132,6 +142,30 @@ export function ProductFormModal({
                 placeholder="KES"
               />
             </div>
+
+            <InputField
+              label="Image URL"
+              value={imageUrl}
+              onChange={setImageUrl}
+              placeholder="https://example.com/product-image.jpg"
+            />
+
+            {normalizedImageUrl ? (
+              <div>
+                <div className="mb-1 text-xs font-medium opacity-70">Preview</div>
+                <div className="flex items-center gap-3 rounded-xl border border-black/10 p-3">
+                  <img
+                    src={normalizedImageUrl}
+                    alt="Product preview"
+                    className="h-16 w-16 rounded-lg border border-black/10 object-cover"
+                    onError={(e) => {
+                      e.currentTarget.style.display = "none";
+                    }}
+                  />
+                  <div className="min-w-0 flex-1 text-xs opacity-70 break-all">{normalizedImageUrl}</div>
+                </div>
+              </div>
+            ) : null}
 
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               <div>
