@@ -3,15 +3,15 @@ from __future__ import annotations
 
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import List
+from typing import Any, Dict, List
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps.tenant import get_current_tenant
 from app.api.deps.permissions import require_permissions
+from app.api.deps.tenant import get_current_tenant
 from app.api.v1.auth import get_current_user
 from app.auth.permissions import Permission
 from app.core.tier_limits import get_admin_limit_for_tier, get_staff_limit_for_tier
@@ -21,11 +21,7 @@ from app.models.tenant import Tenant
 from app.models.tenant_invitation import TenantInvitation
 from app.models.tenant_membership import TenantMembership
 from app.models.user import User
-from app.schemas.tenant_invitation import (
-    AcceptTenantInvite,
-    TenantInviteCreate,
-    TenantInviteOut,
-)
+from app.schemas.tenant_invitation import AcceptTenantInvite, TenantInviteCreate
 
 router = APIRouter(prefix="/tenant-invitations", tags=["tenant-invitations"])
 
@@ -49,6 +45,21 @@ def _generate_token() -> str:
     return secrets.token_urlsafe(48)
 
 
+def _invite_to_dict(inv: TenantInvitation) -> Dict[str, Any]:
+    return {
+        "id": str(inv.id),
+        "tenant_id": str(inv.tenant_id),
+        "email": inv.email,
+        "role": inv.role,
+        "permissions": inv.permissions or [],
+        "token": inv.token,
+        "expires_at": inv.expires_at.isoformat() if inv.expires_at else None,
+        "accepted_at": inv.accepted_at.isoformat() if inv.accepted_at else None,
+        "accepted_by_user_id": str(inv.accepted_by_user_id) if inv.accepted_by_user_id else None,
+        "created_at": inv.created_at.isoformat() if inv.created_at else None,
+    }
+
+
 async def _count_active_role(db: AsyncSession, tenant_id, role: str) -> int:
     stmt = (
         select(func.count())
@@ -63,7 +74,7 @@ async def _count_active_role(db: AsyncSession, tenant_id, role: str) -> int:
 # =========================================================
 # CREATE + LIST (tenant-scoped; permission-gated)
 # =========================================================
-@router.post("", response_model=TenantInviteOut, status_code=status.HTTP_201_CREATED)
+@router.post("", status_code=status.HTTP_201_CREATED)
 async def create_tenant_invitation(
     payload: TenantInviteCreate,
     db: AsyncSession = Depends(get_db),
@@ -75,6 +86,9 @@ async def create_tenant_invitation(
     Create a tenant invitation (ADMIN/STAFF).
     Soft-enforces seat limits at invite time (UX).
     Hard-enforcement happens at accept time.
+
+    Dev/test behavior:
+    - Returns invitation token in JSON response so local UI/network tools can use it.
     """
     email = _normalize_email(str(payload.email))
     role = _normalize_role(payload.role)
@@ -120,7 +134,6 @@ async def create_tenant_invitation(
                 },
             )
 
-    # If user exists and is already an ACTIVE member, block
     existing_user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
     if existing_user is not None:
         existing_membership = (
@@ -135,7 +148,6 @@ async def create_tenant_invitation(
         if existing_membership is not None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User is already a member of this tenant")
 
-    # Block duplicate pending invitation for same tenant+email
     pending_inv = (
         await db.execute(
             select(TenantInvitation).where(
@@ -165,10 +177,10 @@ async def create_tenant_invitation(
     db.add(inv)
     await db.commit()
     await db.refresh(inv)
-    return inv
+    return _invite_to_dict(inv)
 
 
-@router.get("", response_model=List[TenantInviteOut])
+@router.get("")
 async def list_tenant_invitations(
     db: AsyncSession = Depends(get_db),
     tenant: Tenant = Depends(get_current_tenant),
@@ -179,7 +191,8 @@ async def list_tenant_invitations(
         .where(TenantInvitation.tenant_id == tenant.id)
         .order_by(TenantInvitation.created_at.desc())
     )
-    return list((await db.execute(stmt)).scalars().all())
+    invitations = list((await db.execute(stmt)).scalars().all())
+    return [_invite_to_dict(inv) for inv in invitations]
 
 
 # =========================================================

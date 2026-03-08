@@ -1,4 +1,3 @@
-// src/pages/Catalog.tsx
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { PageShell } from "../components/PageShell";
 import { Input } from "../components/Input";
@@ -11,6 +10,7 @@ import {
   type CatalogItem,
   type CatalogScrapeResponse,
   type CatalogUpdateRequest,
+  bulkDeleteCatalogItems,
   bulkUploadCatalogZip,
   createCatalogItem,
   deleteCatalogItem,
@@ -25,7 +25,10 @@ import {
   canWriteCatalog,
 } from "../auth/permissions";
 import { ProductTable } from "../components/catalog/ProductTable";
-import { ProductFormModal, type ProductFormModalState } from "../components/catalog/ProductFormModal";
+import {
+  ProductFormModal,
+  type ProductFormModalState,
+} from "../components/catalog/ProductFormModal";
 
 function normalizeSearch(value: string) {
   return value.trim().toLowerCase();
@@ -45,6 +48,7 @@ export default function Catalog() {
   const canDelete = canDeleteCatalog(membership);
 
   const [items, setItems] = useState<CatalogItem[]>([]);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [busy, setBusy] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,7 +58,9 @@ export default function Catalog() {
 
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [uploadSummary, setUploadSummary] = useState<{ created: number; errors: number } | null>(null);
+  const [uploadSummary, setUploadSummary] = useState<{ created: number; errors: number } | null>(
+    null
+  );
 
   const [importUrlOpen, setImportUrlOpen] = useState(false);
   const [pageMessage, setPageMessage] = useState<string>("");
@@ -72,9 +78,15 @@ export default function Catalog() {
     });
   }, [items, q]);
 
+  const selectedCount = useMemo(() => {
+    const visibleIds = new Set(filteredItems.map((item) => item.id));
+    return selectedIds.filter((id) => visibleIds.has(id)).length;
+  }, [filteredItems, selectedIds]);
+
   const loadCatalog = useCallback(async () => {
     if (!tenantId) {
       setItems([]);
+      setSelectedIds([]);
       setError("Select a tenant to view catalog items.");
       setLoading(false);
       return;
@@ -82,6 +94,7 @@ export default function Catalog() {
 
     if (!canRead) {
       setItems([]);
+      setSelectedIds([]);
       setError("You do not have permission to view catalog items.");
       setLoading(false);
       return;
@@ -107,10 +120,7 @@ export default function Catalog() {
 
     try {
       const tenants = await getTenants<TenantSummary[]>();
-      const active = Array.isArray(tenants)
-        ? tenants.find((t) => t.id === tenantId)
-        : undefined;
-
+      const active = Array.isArray(tenants) ? tenants.find((t) => t.id === tenantId) : undefined;
       setTenantName(active?.name ?? "");
     } catch {
       setTenantName("");
@@ -126,6 +136,27 @@ export default function Catalog() {
     if (!ready) return;
     void loadActiveTenantName();
   }, [ready, loadActiveTenantName]);
+
+  useEffect(() => {
+    setSelectedIds((prev) => prev.filter((id) => items.some((item) => item.id === id)));
+  }, [items]);
+
+  function handleToggleSelect(itemId: string) {
+    setSelectedIds((prev) =>
+      prev.includes(itemId) ? prev.filter((id) => id !== itemId) : [...prev, itemId]
+    );
+  }
+
+  function handleToggleSelectAll(checked: boolean) {
+    const visibleIds = filteredItems.map((item) => item.id);
+
+    setSelectedIds((prev) => {
+      if (checked) {
+        return Array.from(new Set([...prev, ...visibleIds]));
+      }
+      return prev.filter((id) => !visibleIds.includes(id));
+    });
+  }
 
   async function handleCreate(payload: CatalogCreateRequest) {
     try {
@@ -165,16 +196,66 @@ export default function Catalog() {
     const confirmed = window.confirm(`Delete "${item.title}"? This action cannot be undone.`);
     if (!confirmed) return;
 
+    const previousItems = items;
+    const previousSelectedIds = selectedIds;
+
     try {
       setBusy(true);
       setError(null);
       setPageMessage("");
 
-      await deleteCatalogItem(item.id);
       setItems((prev) => prev.filter((entry) => entry.id !== item.id));
+      setSelectedIds((prev) => prev.filter((id) => id !== item.id));
+
+      await deleteCatalogItem(item.id);
       setPageMessage("Product deleted successfully.");
     } catch (e) {
+      setItems(previousItems);
+      setSelectedIds(previousSelectedIds);
       setError(e instanceof ApiError ? e.message : "Failed to delete catalog item.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleBulkDelete() {
+    if (!selectedCount) return;
+
+    const visibleSelectedIds = selectedIds.filter((id) =>
+      filteredItems.some((item) => item.id === id)
+    );
+
+    if (!visibleSelectedIds.length) return;
+
+    const confirmed = window.confirm(
+      `Delete ${visibleSelectedIds.length} selected product${
+        visibleSelectedIds.length === 1 ? "" : "s"
+      }? This action cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    const previousItems = items;
+    const previousSelectedIds = selectedIds;
+
+    try {
+      setBusy(true);
+      setError(null);
+      setPageMessage("");
+
+      setItems((prev) => prev.filter((item) => !visibleSelectedIds.includes(item.id)));
+      setSelectedIds((prev) => prev.filter((id) => !visibleSelectedIds.includes(id)));
+
+      await bulkDeleteCatalogItems(visibleSelectedIds);
+
+      setPageMessage(
+        `${visibleSelectedIds.length} product${
+          visibleSelectedIds.length === 1 ? "" : "s"
+        } deleted successfully.`
+      );
+    } catch (e) {
+      setItems(previousItems);
+      setSelectedIds(previousSelectedIds);
+      setError(e instanceof ApiError ? e.message : "Failed to delete selected catalog items.");
     } finally {
       setBusy(false);
     }
@@ -279,6 +360,33 @@ export default function Catalog() {
           </div>
         </div>
 
+        {canDelete && selectedCount > 0 ? (
+          <div className="flex flex-col gap-3 rounded-2xl border border-black/10 bg-white p-4 md:flex-row md:items-center md:justify-between">
+            <div className="text-sm">
+              <span className="font-medium">{selectedCount}</span>{" "}
+              selected
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="danger"
+                onClick={() => void handleBulkDelete()}
+                disabled={busy || uploading || loading}
+              >
+                Delete Selected
+              </Button>
+
+              <Button
+                variant="secondary"
+                disabled
+                title="Create Campaign will be wired in the next phase."
+              >
+                Create Campaign
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
         {pageMessage ? (
           <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
             {pageMessage}
@@ -320,6 +428,9 @@ export default function Catalog() {
             items={filteredItems}
             canWrite={canWrite}
             canDelete={canDelete}
+            selectedIds={selectedIds}
+            onToggleSelect={handleToggleSelect}
+            onToggleSelectAll={handleToggleSelectAll}
             onEdit={(item) => setModal({ open: true, mode: "edit", initial: item })}
             onDelete={(item) => void handleDelete(item)}
           />

@@ -199,6 +199,15 @@ export type CatalogUpdateRequest = {
   status?: string;
 };
 
+export type BulkDeleteCatalogItemsRequest = {
+  item_ids: string[];
+};
+
+export type BulkDeleteCatalogItemsResponse = {
+  deleted_ids?: string[];
+  deleted_count?: number;
+};
+
 export type BulkUploadCatalogCreatedEntry = {
   item: CatalogItem;
   folder: string;
@@ -240,12 +249,25 @@ export async function createCatalogItem(payload: CatalogCreateRequest): Promise<
   return await post("/api/v1/catalog/items", payload);
 }
 
-export async function updateCatalogItem(itemId: string, payload: CatalogUpdateRequest): Promise<CatalogItem> {
+export async function updateCatalogItem(
+  itemId: string,
+  payload: CatalogUpdateRequest
+): Promise<CatalogItem> {
   return await patch(`/api/v1/catalog/items/${encodeURIComponent(itemId)}`, payload);
 }
 
 export async function deleteCatalogItem(itemId: string): Promise<void> {
   await del(`/api/v1/catalog/items/${encodeURIComponent(itemId)}`);
+}
+
+export async function bulkDeleteCatalogItems(
+  itemIds: string[]
+): Promise<BulkDeleteCatalogItemsResponse> {
+  await Promise.all(itemIds.map((itemId) => deleteCatalogItem(itemId)));
+  return {
+    deleted_ids: itemIds,
+    deleted_count: itemIds.length,
+  };
 }
 
 export async function bulkUploadCatalogZip(file: File): Promise<BulkUploadCatalogResponse> {
@@ -295,7 +317,9 @@ export const getTenants = async <T = any[]>(): Promise<T> => {
   return await get<T>("/api/v1/tenants");
 };
 
-export const createTenant = async <T = any>(payload: { name: string; [key: string]: any }): Promise<T> => {
+export const createTenant = async <T = any>(
+  payload: { name: string; [key: string]: any }
+): Promise<T> => {
   return await post<T>("/api/v1/tenants", payload);
 };
 
@@ -331,7 +355,9 @@ export type CreateInvitationRequest = {
   permissions?: string[];
 };
 
-export const listTenantInvitations = async <T = TenantInvitation[] | { items: TenantInvitation[] }>(): Promise<T> => {
+export const listTenantInvitations = async <
+  T = TenantInvitation[] | { items: TenantInvitation[] }
+>(): Promise<T> => {
   return await get<T>("/api/v1/tenant-invitations");
 };
 
@@ -343,7 +369,9 @@ export const inviteTenantMember = async <T = TenantInvitation>(payload: {
   return await post<T>("/api/v1/tenant-invitations", payload);
 };
 
-export const createTenantInvitation = async (payload: CreateInvitationRequest): Promise<TenantInvitation> => {
+export const createTenantInvitation = async (
+  payload: CreateInvitationRequest
+): Promise<TenantInvitation> => {
   return await post<TenantInvitation>("/api/v1/tenant-invitations", payload);
 };
 
@@ -385,7 +413,10 @@ export async function listTenantMembers(): Promise<TenantMember[]> {
   return api<TenantMember[]>("/api/v1/tenants/members", { method: "GET" });
 }
 
-export async function updateTenantMember(memberUserId: string, payload: UpdateTenantMemberRequest): Promise<TenantMember> {
+export async function updateTenantMember(
+  memberUserId: string,
+  payload: UpdateTenantMemberRequest
+): Promise<TenantMember> {
   return api<TenantMember>(`/api/v1/tenants/members/${memberUserId}`, {
     method: "PATCH",
     body: payload,

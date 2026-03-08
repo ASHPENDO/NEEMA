@@ -1,7 +1,7 @@
-# app/api/v1/catalog.py
 from __future__ import annotations
 
 import asyncio
+import html
 import json
 import random
 import re
@@ -37,18 +37,28 @@ router = APIRouter(prefix="/catalog/items", tags=["catalog"])
 # ------------------------------------------------------------------
 
 _PRICE_RE = re.compile(r"(KSh|KES|Sh)\s*([0-9][0-9,\.]*)", flags=re.IGNORECASE)
+_TAG_RE = re.compile(r"<[^>]+>")
+_WS_RE = re.compile(r"\s+")
 
 # A few realistic UA strings. Keep small + stable.
 _UA_POOL = [
-    # Chrome Win10
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    # Chrome Mac
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    # Safari Mac
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3 Safari/605.1.15",
-    # Firefox Win10
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0",
 ]
+
+
+def _clean_scraped_text(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        value = str(value)
+
+    text = html.unescape(value)
+    text = _TAG_RE.sub(" ", text)
+    text = _WS_RE.sub(" ", text).strip()
+    return text or None
 
 
 def _coerce_decimal(value: Any) -> Optional[Decimal]:
@@ -63,7 +73,7 @@ def _coerce_decimal(value: Any) -> Optional[Decimal]:
             return None
     if isinstance(value, str):
         s = value.strip()
-        s = re.sub(r"[^\d.]+", "", s)  # "KSh 24,995" -> "24995"
+        s = re.sub(r"[^\d.]+", "", s)
         if not s:
             return None
         try:
@@ -82,7 +92,6 @@ def _browser_like_headers(target_url: str) -> Dict[str, str]:
     root = _site_root(target_url)
     ua = random.choice(_UA_POOL)
 
-    # A conservative, browser-ish set. Avoid adding too many fingerprinty headers.
     return {
         "User-Agent": ua,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
@@ -94,13 +103,13 @@ def _browser_like_headers(target_url: str) -> Dict[str, str]:
     }
 
 
-def _extract_jsonld_blocks(html: str) -> List[Any]:
+def _extract_jsonld_blocks(html_text: str) -> List[Any]:
     blocks: List[Any] = []
     pattern = re.compile(
         r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
         re.IGNORECASE | re.DOTALL,
     )
-    for m in pattern.finditer(html):
+    for m in pattern.finditer(html_text):
         raw = (m.group(1) or "").strip()
         if not raw:
             continue
@@ -177,9 +186,9 @@ def _extract_image_url(value: Any) -> Optional[str]:
 def _extract_product_fields(
     prod: Dict[str, Any],
 ) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str], Optional[Decimal], Optional[str]]:
-    title = prod.get("name") or prod.get("title")
-    description = prod.get("description")
-    sku = prod.get("sku") or prod.get("mpn")
+    raw_title = prod.get("name") or prod.get("title")
+    raw_description = prod.get("description")
+    raw_sku = prod.get("sku") or prod.get("mpn")
     image_url = _extract_image_url(prod.get("image"))
 
     price_amount: Optional[Decimal] = None
@@ -209,20 +218,9 @@ def _extract_product_fields(
         if isinstance(pc, str) and pc.strip():
             price_currency = pc.strip()
 
-    if isinstance(title, str):
-        title = title.strip()
-    else:
-        title = None
-
-    if isinstance(description, str):
-        description = description.strip()
-    else:
-        description = None
-
-    if isinstance(sku, str):
-        sku = sku.strip()
-    else:
-        sku = None
+    title = _clean_scraped_text(raw_title)
+    description = _clean_scraped_text(raw_description)
+    sku = _clean_scraped_text(raw_sku)
 
     if isinstance(image_url, str):
         image_url = image_url.strip() or None
@@ -235,27 +233,27 @@ def _extract_product_fields(
     return title, description, sku, image_url, price_amount, price_currency
 
 
-def _extract_og_fallback(html: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+def _extract_og_fallback(html_text: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     def meta(property_name: str) -> Optional[str]:
         m = re.search(
             rf'<meta[^>]+property=["\']{re.escape(property_name)}["\'][^>]+content=["\'](.*?)["\']',
-            html,
+            html_text,
             flags=re.IGNORECASE | re.DOTALL,
         )
         if not m:
             return None
-        val = re.sub(r"\s+", " ", (m.group(1) or "")).strip()
+        val = _clean_scraped_text(m.group(1) or "")
         return val or None
 
     def meta_name(name: str) -> Optional[str]:
         m = re.search(
             rf'<meta[^>]+name=["\']{re.escape(name)}["\'][^>]+content=["\'](.*?)["\']',
-            html,
+            html_text,
             flags=re.IGNORECASE | re.DOTALL,
         )
         if not m:
             return None
-        val = re.sub(r"\s+", " ", (m.group(1) or "")).strip()
+        val = _clean_scraped_text(m.group(1) or "")
         return val or None
 
     ogt = meta("og:title")
@@ -265,23 +263,17 @@ def _extract_og_fallback(html: str) -> Tuple[Optional[str], Optional[str], Optio
 
 
 def _strip_tags(s: str) -> str:
+    s = html.unescape(s)
     s = re.sub(r"<[^>]+>", " ", s)
     s = re.sub(r"\s+", " ", s)
     return s.strip()
 
 
-def _extract_product_links(base_url: str, html: str, limit: int) -> List[str]:
-    """
-    Discover product links on collection/category pages.
-    Supports:
-      - Shopify: /products/<handle>
-      - Woo: /product/<slug>
-      - Homelink-style: /catalogue/<slug>  (exclude /catalogue/category/)
-    """
+def _extract_product_links(base_url: str, html_text: str, limit: int) -> List[str]:
     parsed = urlparse(base_url)
     base_host = parsed.netloc
 
-    hrefs = re.findall(r'href=["\']([^"\']+)["\']', html, flags=re.IGNORECASE)
+    hrefs = re.findall(r'href=["\']([^"\']+)["\']', html_text, flags=re.IGNORECASE)
     candidates: List[str] = []
 
     for href in hrefs:
@@ -320,11 +312,10 @@ def _is_blocked_status(code: int) -> bool:
     return code in (401, 403, 429)
 
 
-def _extract_meta_refresh_url(html: str) -> Optional[str]:
-    # <meta http-equiv="refresh" content="0; url=/somewhere">
+def _extract_meta_refresh_url(html_text: str) -> Optional[str]:
     m = re.search(
         r'<meta[^>]+http-equiv=["\']refresh["\'][^>]+content=["\']\s*\d+\s*;\s*url=([^"\']+)["\']',
-        html,
+        html_text,
         flags=re.IGNORECASE,
     )
     if not m:
@@ -332,15 +323,14 @@ def _extract_meta_refresh_url(html: str) -> Optional[str]:
     return (m.group(1) or "").strip() or None
 
 
-def _extract_js_redirect_url(html: str) -> Optional[str]:
-    # very light heuristics
+def _extract_js_redirect_url(html_text: str) -> Optional[str]:
     patterns = [
         r"window\.location\.href\s*=\s*['\"]([^'\"]+)['\"]",
         r"window\.location\s*=\s*['\"]([^'\"]+)['\"]",
         r"location\.href\s*=\s*['\"]([^'\"]+)['\"]",
     ]
     for pat in patterns:
-        m = re.search(pat, html, flags=re.IGNORECASE)
+        m = re.search(pat, html_text, flags=re.IGNORECASE)
         if m:
             u = (m.group(1) or "").strip()
             if u:
@@ -349,12 +339,6 @@ def _extract_js_redirect_url(html: str) -> Optional[str]:
 
 
 async def _fetch_soft(client: httpx.AsyncClient, url: str, *, max_retries: int = 3) -> Tuple[int, str]:
-    """
-    Option B: "softer" fetching.
-    - Rotate browser-like headers
-    - Add small retry/backoff on 403/429
-    - Handle simple meta refresh / JS redirect once
-    """
     last_status = 0
     last_text = ""
 
@@ -364,25 +348,21 @@ async def _fetch_soft(client: httpx.AsyncClient, url: str, *, max_retries: int =
         try:
             r = await client.get(url, headers=headers)
         except httpx.RequestError as e:
-            # network/DNS errors: fail fast with a 502 upstream
             raise HTTPException(status_code=502, detail=f"Failed to fetch URL (network/DNS error): {str(e)}")
 
         last_status = r.status_code
         last_text = r.text or ""
 
-        # Handle soft redirects commonly used by some sites (not JS challenges)
         if r.status_code == 200 and last_text:
             meta_u = _extract_meta_refresh_url(last_text)
             js_u = _extract_js_redirect_url(last_text)
             next_u = meta_u or js_u
             if next_u:
                 next_abs = urljoin(url, next_u)
-                # follow once, with fresh headers
                 r2 = await client.get(next_abs, headers=_browser_like_headers(next_abs))
                 return r2.status_code, (r2.text or "")
 
         if last_status in (429, 403):
-            # backoff with jitter; try again with a different UA / headers
             await asyncio.sleep((0.6 * (attempt + 1)) + random.random() * 0.6)
             continue
 
@@ -391,8 +371,8 @@ async def _fetch_soft(client: httpx.AsyncClient, url: str, *, max_retries: int =
     return last_status, last_text
 
 
-def _products_from_html_jsonld(html: str) -> List[Dict[str, Any]]:
-    blocks = _extract_jsonld_blocks(html)
+def _products_from_html_jsonld(html_text: str) -> List[Dict[str, Any]]:
+    blocks = _extract_jsonld_blocks(html_text)
     out: List[Dict[str, Any]] = []
     for b in blocks:
         out.extend(_iter_products_from_jsonld(b))
@@ -406,10 +386,10 @@ def _parse_price_from_text(text: str) -> Optional[Decimal]:
     return _coerce_decimal(m.group(2))
 
 
-def _parse_homelink_list_page(html: str, base_url: str, limit: int) -> List[Dict[str, Any]]:
+def _parse_homelink_list_page(html_text: str, base_url: str, limit: int) -> List[Dict[str, Any]]:
     anchors = re.findall(
         r'<a[^>]+href=["\']([^"\']+)["\'][^>]*>(.*?)</a>',
-        html,
+        html_text,
         flags=re.IGNORECASE | re.DOTALL,
     )
 
@@ -445,6 +425,7 @@ def _parse_homelink_list_page(html: str, base_url: str, limit: int) -> List[Dict
         title = re.sub(r"\+\s*Compare\b", "", title, flags=re.IGNORECASE)
         title = re.sub(r"\s+", " ", title).strip()
 
+        title = _clean_scraped_text(title)
         if not title or len(title) > 255:
             continue
 
@@ -469,33 +450,36 @@ def _parse_homelink_list_page(html: str, base_url: str, limit: int) -> List[Dict
 
 
 def _parse_product_page_fallback(
-    html: str,
+    html_text: str,
 ) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str], Optional[Decimal]]:
-    h1 = re.search(r"<h1[^>]*>(.*?)</h1>", html, flags=re.IGNORECASE | re.DOTALL)
+    h1 = re.search(r"<h1[^>]*>(.*?)</h1>", html_text, flags=re.IGNORECASE | re.DOTALL)
     title = _strip_tags(h1.group(1)) if h1 else None
 
-    og_title, og_desc, og_image = _extract_og_fallback(html)
+    og_title, og_desc, og_image = _extract_og_fallback(html_text)
     if not title:
         title = og_title
 
     sku = None
-    msku = re.search(r"\bSKU\b[:\s]*([A-Za-z0-9\-_]+)", html, flags=re.IGNORECASE)
+    msku = re.search(r"\bSKU\b[:\s]*([A-Za-z0-9\-_]+)", html_text, flags=re.IGNORECASE)
     if msku:
-        sku = msku.group(1).strip()
+        sku = _clean_scraped_text(msku.group(1).strip())
 
     price_amount = None
-    mprice = _PRICE_RE.search(html)
+    mprice = _PRICE_RE.search(html_text)
     if mprice:
         price_amount = _coerce_decimal(mprice.group(2))
 
     desc = og_desc
     if not desc:
-        ps = re.findall(r"<p[^>]*>(.*?)</p>", html, flags=re.IGNORECASE | re.DOTALL)
+        ps = re.findall(r"<p[^>]*>(.*?)</p>", html_text, flags=re.IGNORECASE | re.DOTALL)
         for p in ps[:10]:
             t = _strip_tags(p)
             if len(t) >= 60:
                 desc = t
                 break
+
+    title = _clean_scraped_text(title)
+    desc = _clean_scraped_text(desc)
 
     return title, desc, sku, og_image, price_amount
 
@@ -516,8 +500,8 @@ async def _try_woocommerce_store_api(client: httpx.AsyncClient, root: str, max_i
     for item in data:
         if not isinstance(item, dict):
             continue
-        name = item.get("name")
-        if not isinstance(name, str) or not name.strip():
+        name = _clean_scraped_text(item.get("name"))
+        if not name:
             continue
 
         prices = item.get("prices") if isinstance(item.get("prices"), dict) else {}
@@ -536,19 +520,15 @@ async def _try_woocommerce_store_api(client: httpx.AsyncClient, root: str, max_i
         if isinstance(images, list) and images:
             first = images[0]
             if isinstance(first, dict):
-                image_url = (
-                    first.get("src")
-                    or first.get("thumbnail")
-                    or first.get("srcset")
-                )
+                image_url = first.get("src") or first.get("thumbnail") or first.get("srcset")
                 if isinstance(image_url, str):
                     image_url = image_url.strip() or None
 
         out.append(
             {
-                "name": name.strip(),
-                "description": item.get("short_description") or item.get("description"),
-                "sku": item.get("sku"),
+                "name": name,
+                "description": _clean_scraped_text(item.get("short_description") or item.get("description")),
+                "sku": _clean_scraped_text(item.get("sku")),
                 "image_url": image_url,
                 "price_amount": price_amount,
                 "price_currency": (currency or "KES"),
@@ -578,8 +558,8 @@ async def _try_shopify_product_json(client: httpx.AsyncClient, product_url: str)
     if not isinstance(data, dict):
         return None
 
-    title = data.get("title")
-    if not isinstance(title, str) or not title.strip():
+    title = _clean_scraped_text(data.get("title"))
+    if not title:
         return None
 
     variants = data.get("variants") if isinstance(data.get("variants"), list) else []
@@ -597,7 +577,7 @@ async def _try_shopify_product_json(client: httpx.AsyncClient, product_url: str)
     sku = None
     for v in variants:
         if isinstance(v, dict) and isinstance(v.get("sku"), str) and v.get("sku").strip():
-            sku = v.get("sku").strip()
+            sku = _clean_scraped_text(v.get("sku").strip())
             break
 
     image_url = None
@@ -610,8 +590,8 @@ async def _try_shopify_product_json(client: httpx.AsyncClient, product_url: str)
             image_url = first.strip()
 
     return {
-        "name": title.strip(),
-        "description": data.get("description"),
+        "name": title,
+        "description": _clean_scraped_text(data.get("description")),
         "sku": sku,
         "image_url": image_url,
         "price_amount": price_amount,
@@ -807,13 +787,12 @@ async def scrape_catalog_items(
         follow_redirects=True,
         http2=True,
     ) as client:
-        # 0) Try WooCommerce Store API first (if enabled)
         if payload.try_woocommerce_store_api:
             try:
                 api_products = await _try_woocommerce_store_api(client, root, max_items=payload.max_items)
                 if api_products:
                     for p in api_products[: payload.max_items]:
-                        title = (p.get("name") or "").strip()
+                        title = _clean_scraped_text(p.get("name"))
                         price_amount = _coerce_decimal(p.get("price_amount"))
                         price_currency = p.get("price_currency") or payload.default_currency
                         if not title or not price_amount or price_amount <= 0:
@@ -822,8 +801,8 @@ async def scrape_catalog_items(
                         item = _make_item(
                             membership=membership,
                             title=title,
-                            description=p.get("description"),
-                            sku=p.get("sku"),
+                            description=_clean_scraped_text(p.get("description")),
+                            sku=_clean_scraped_text(p.get("sku")),
                             image_url=p.get("image_url"),
                             price_amount=price_amount,
                             price_currency=str(price_currency),
@@ -834,9 +813,8 @@ async def scrape_catalog_items(
             except Exception:
                 pass
 
-        # 1) Fetch the provided URL with "soft" improvements
         if not created:
-            status_code, html = await _fetch_soft(client, url, max_retries=3)
+            status_code, html_text = await _fetch_soft(client, url, max_retries=3)
 
             if _is_blocked_status(status_code):
                 return CatalogScrapeResponse(
@@ -854,8 +832,7 @@ async def scrape_catalog_items(
                     ),
                 )
 
-            # 2) JSON-LD Product/Offer ingestion
-            product_dicts = _products_from_html_jsonld(html)
+            product_dicts = _products_from_html_jsonld(html_text)
             if product_dicts:
                 new_created, new_skipped = _ingest_products_dicts(
                     db=db,
@@ -869,14 +846,13 @@ async def scrape_catalog_items(
                 if created:
                     mode_used = "jsonld"
 
-            # 3) Homelink-style category/list parsing
             if not created:
-                homelink_items = _parse_homelink_list_page(html, base_url=url, limit=min(payload.max_items, 200))
+                homelink_items = _parse_homelink_list_page(html_text, base_url=url, limit=min(payload.max_items, 200))
                 if homelink_items:
                     for p in homelink_items:
                         if len(created) >= payload.max_items:
                             break
-                        title = (p.get("name") or "").strip()
+                        title = _clean_scraped_text(p.get("name"))
                         price_amount = _coerce_decimal(p.get("price_amount"))
                         if not title or not price_amount or price_amount <= 0:
                             skipped += 1
@@ -895,16 +871,14 @@ async def scrape_catalog_items(
                     if created:
                         mode_used = "homelink_list"
 
-            # 4) Optional crawl of product pages discovered from the URL page
             if payload.crawl_product_pages and len(created) < payload.max_items:
-                links = _extract_product_links(url, html, limit=payload.max_product_pages)
+                links = _extract_product_links(url, html_text, limit=payload.max_product_pages)
                 discovered_links = len(links)
 
                 for link in links:
                     if len(created) >= payload.max_items:
                         break
 
-                    # fetch each product link with soft headers (no heavy retries here)
                     try:
                         r = await client.get(link, headers=_browser_like_headers(link))
                     except httpx.RequestError:
@@ -934,14 +908,14 @@ async def scrape_catalog_items(
                     if (not ingested_this_page) and payload.try_shopify_product_json:
                         shopify_p = await _try_shopify_product_json(client, link)
                         if shopify_p:
-                            title = (shopify_p.get("name") or "").strip()
+                            title = _clean_scraped_text(shopify_p.get("name"))
                             price_amount = _coerce_decimal(shopify_p.get("price_amount"))
                             if title and price_amount and price_amount > 0:
                                 item = _make_item(
                                     membership=membership,
                                     title=title,
-                                    description=shopify_p.get("description"),
-                                    sku=shopify_p.get("sku"),
+                                    description=_clean_scraped_text(shopify_p.get("description")),
+                                    sku=_clean_scraped_text(shopify_p.get("sku")),
                                     image_url=shopify_p.get("image_url"),
                                     price_amount=price_amount,
                                     price_currency=payload.default_currency,
@@ -969,17 +943,17 @@ async def scrape_catalog_items(
                     if ingested_this_page and mode_used == "unknown":
                         mode_used = "crawl_product_pages"
 
-            # 5) Last-resort fallback from OG + provided fallback price
             if not created and payload.allow_fallback:
-                og_title, og_desc, og_image = _extract_og_fallback(html)
-                if og_title and payload.fallback_price_amount and payload.fallback_price_amount > 0:
+                og_title, og_desc, og_image = _extract_og_fallback(html_text)
+                fallback_amount = _coerce_decimal(payload.fallback_price_amount)
+                if og_title and fallback_amount and fallback_amount > 0:
                     item = _make_item(
                         membership=membership,
                         title=og_title.strip(),
                         description=og_desc,
                         sku=None,
                         image_url=og_image,
-                        price_amount=payload.fallback_price_amount,
+                        price_amount=fallback_amount,
                         price_currency=(payload.fallback_price_currency or payload.default_currency),
                     )
                     db.add(item)

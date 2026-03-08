@@ -1,6 +1,6 @@
-# app/api/v1/catalog_upload.py
 from __future__ import annotations
 
+import html
 import json
 import os
 import re
@@ -38,6 +38,22 @@ MEDIA_EXTENSIONS = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
 # Helpers
 # ------------------------------------------------------------------
 
+_TAG_RE = re.compile(r"<[^>]+>")
+_WS_RE = re.compile(r"\s+")
+
+
+def _clean_scraped_text(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        value = str(value)
+
+    text = html.unescape(value)
+    text = _TAG_RE.sub(" ", text)
+    text = _WS_RE.sub(" ", text).strip()
+    return text or None
+
+
 def _coerce_decimal(value: Any) -> Optional[Decimal]:
     if value is None:
         return None
@@ -63,12 +79,7 @@ def _coerce_decimal(value: Any) -> Optional[Decimal]:
 
 
 def _normalize_str(value: Any) -> Optional[str]:
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        value = str(value)
-    value = value.strip()
-    return value or None
+    return _clean_scraped_text(value)
 
 
 def _normalize_tags(value: Any) -> List[str]:
@@ -82,7 +93,7 @@ def _normalize_tags(value: Any) -> List[str]:
                 out.append(s)
         return out
     if isinstance(value, str):
-        parts = [x.strip() for x in value.split(",")]
+        parts = [_clean_scraped_text(x) for x in value.split(",")]
         return [x for x in parts if x]
     return []
 
@@ -640,5 +651,6 @@ async def bulk_upload_catalog_zip(
             "Primary local images are now optimized before upload when present.",
             "Public image URLs are saved to image_url through the configured storage adapter.",
             "If details.json.image_url is provided, it is preserved as-is.",
+            "Imported title/description text is sanitized before saving.",
         ],
     }

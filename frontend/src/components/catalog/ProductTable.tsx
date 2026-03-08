@@ -1,5 +1,5 @@
 // src/components/catalog/ProductTable.tsx
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import type { CatalogItem } from "../../lib/api";
 import { Button } from "../Button";
 
@@ -32,6 +32,9 @@ type ProductTableProps = {
   items: CatalogItem[];
   canWrite: boolean;
   canDelete: boolean;
+  selectedIds: string[];
+  onToggleSelect: (itemId: string) => void;
+  onToggleSelectAll: (checked: boolean) => void;
   onEdit: (item: CatalogItem) => void;
   onDelete: (item: CatalogItem) => void;
 };
@@ -40,14 +43,24 @@ export function ProductTable({
   items,
   canWrite,
   canDelete,
+  selectedIds,
+  onToggleSelect,
+  onToggleSelectAll,
   onEdit,
   onDelete,
 }: ProductTableProps) {
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+
+  const allSelected = items.length > 0 && items.every((item) => selectedSet.has(item.id));
+  const someSelected = items.some((item) => selectedSet.has(item.id));
+
   if (!items.length) {
     return (
       <div className="rounded-2xl border border-black/10 bg-white p-8 text-sm">
         <div className="font-medium">No products yet</div>
-        <div className="mt-1 opacity-70">Create your first product, import from URL, or use bulk upload.</div>
+        <div className="mt-1 opacity-70">
+          Create your first product, import from URL, or use bulk upload.
+        </div>
       </div>
     );
   }
@@ -55,14 +68,28 @@ export function ProductTable({
   return (
     <div className="overflow-hidden rounded-2xl border border-black/10 bg-white">
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[820px] text-left text-sm">
+        <table className="w-full table-auto text-left text-sm">
           <thead className="bg-black/[0.03]">
             <tr>
+              <th className="w-12 px-4 py-3 font-medium">
+                <input
+                  type="checkbox"
+                  aria-label={allSelected ? "Deselect all products" : "Select all products"}
+                  checked={allSelected}
+                  ref={(el) => {
+                    if (el) el.indeterminate = !allSelected && someSelected;
+                  }}
+                  onChange={(e) => onToggleSelectAll(e.target.checked)}
+                  className="h-4 w-4 rounded border-black/20"
+                />
+              </th>
               <th className="px-4 py-3 font-medium">Product</th>
               <th className="px-4 py-3 font-medium">SKU</th>
               <th className="px-4 py-3 font-medium">Price</th>
               <th className="px-4 py-3 font-medium">Status</th>
-              <th className="px-4 py-3 font-medium text-right">Actions</th>
+              <th className="sticky right-0 z-10 w-[180px] bg-black/[0.03] px-4 py-3 font-medium text-right shadow-[-8px_0_12px_-10px_rgba(0,0,0,0.15)]">
+                Actions
+              </th>
             </tr>
           </thead>
 
@@ -73,6 +100,8 @@ export function ProductTable({
                 item={item}
                 canWrite={canWrite}
                 canDelete={canDelete}
+                selected={selectedSet.has(item.id)}
+                onToggleSelect={onToggleSelect}
                 onEdit={onEdit}
                 onDelete={onDelete}
               />
@@ -88,12 +117,16 @@ function ProductRow({
   item,
   canWrite,
   canDelete,
+  selected,
+  onToggleSelect,
   onEdit,
   onDelete,
 }: {
   item: CatalogItem;
   canWrite: boolean;
   canDelete: boolean;
+  selected: boolean;
+  onToggleSelect: (itemId: string) => void;
   onEdit: (item: CatalogItem) => void;
   onDelete: (item: CatalogItem) => void;
 }) {
@@ -103,8 +136,20 @@ function ProductRow({
   return (
     <tr className="border-t border-black/5 align-top">
       <td className="px-4 py-3">
-        <div className="flex items-start gap-3">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-black/10 bg-black/[0.03]">
+        <div className="flex items-center justify-center pt-1">
+          <input
+            type="checkbox"
+            aria-label={`Select ${item.title}`}
+            checked={selected}
+            onChange={() => onToggleSelect(item.id)}
+            className="h-4 w-4 rounded border-black/20"
+          />
+        </div>
+      </td>
+
+      <td className="px-4 py-3">
+        <div className="flex items-start gap-2">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-black/10 bg-black/[0.03]">
             {hasImage ? (
               <img
                 src={item.image_url ?? undefined}
@@ -132,13 +177,15 @@ function ProductRow({
       </td>
 
       <td className="px-4 py-3">{item.sku || "—"}</td>
-      <td className="px-4 py-3">{formatMoney(item.price_amount, item.price_currency)}</td>
+      <td className="px-4 py-3 whitespace-nowrap">
+        {formatMoney(item.price_amount, item.price_currency)}
+      </td>
       <td className="px-4 py-3">
         <span className="rounded-full bg-black/[0.05] px-2 py-1 text-xs">
           {formatStatus(item.status)}
         </span>
       </td>
-      <td className="px-4 py-3">
+      <td className="sticky right-0 z-[1] bg-white px-4 py-3 whitespace-nowrap shadow-[-8px_0_12px_-10px_rgba(0,0,0,0.15)]">
         <div className="flex justify-end gap-2">
           {canWrite && (
             <Button variant="secondary" onClick={() => onEdit(item)}>
