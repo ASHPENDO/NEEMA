@@ -1,3 +1,4 @@
+// frontend/src/lib/api.ts
 import axios from "axios";
 import { tokenStorage } from "./storage";
 import { activeTenantStorage } from "./tenantStorage";
@@ -8,10 +9,6 @@ export type ApiErrorShape = {
   details?: unknown;
 };
 
-/**
- * ApiError extends the built-in Error class to include an HTTP status and
- * optional details.
- */
 export class ApiError extends Error {
   status: number;
   details?: unknown;
@@ -31,7 +28,8 @@ export type RequestOptions = {
   signal?: AbortSignal;
 };
 
-const DEFAULT_DEV_BASE = "http://127.0.0.1:8000";
+// Use localhost consistently in dev to avoid browser origin quirks.
+const DEFAULT_DEV_BASE = "http://localhost:8000";
 const rawBase = import.meta.env.VITE_API_BASE_URL ?? DEFAULT_DEV_BASE;
 const BASE_URL = String(rawBase).replace(/\/+$/, "");
 
