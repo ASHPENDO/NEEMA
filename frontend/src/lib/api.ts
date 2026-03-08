@@ -1,4 +1,3 @@
-// src/lib/api.ts
 import axios from "axios";
 import { tokenStorage } from "./storage";
 import { activeTenantStorage } from "./tenantStorage";
@@ -32,8 +31,6 @@ export type RequestOptions = {
   signal?: AbortSignal;
 };
 
-// IMPORTANT: avoid localhost to prevent IPv6/hosts mismatch on some machines.
-// If VITE_API_BASE_URL is not set, fall back to 127.0.0.1:8000.
 const DEFAULT_DEV_BASE = "http://127.0.0.1:8000";
 const rawBase = import.meta.env.VITE_API_BASE_URL ?? DEFAULT_DEV_BASE;
 const BASE_URL = String(rawBase).replace(/\/+$/, "");
@@ -154,14 +151,6 @@ export const del = async <T>(path: string, opts: RequestOptions = {}): Promise<T
 /*
  * ============================================================================
  * Catalog / Products (tenant-scoped)
- * Backend paths:
- *   GET    /api/v1/catalog/items
- *   POST   /api/v1/catalog/items
- *   GET    /api/v1/catalog/items/{item_id}
- *   PATCH  /api/v1/catalog/items/{item_id}
- *   DELETE /api/v1/catalog/items/{item_id}
- *   POST   /api/v1/catalog/items/bulk-upload
- *   POST   /api/v1/catalog/items/scrape
  * ============================================================================
  */
 
@@ -355,6 +344,13 @@ export type CreateInvitationRequest = {
   permissions?: string[];
 };
 
+export type AcceptTenantInvitationResponse = {
+  status: string;
+  tenant_id: string;
+  user_id: string;
+  role: TenantRole;
+};
+
 export const listTenantInvitations = async <
   T = TenantInvitation[] | { items: TenantInvitation[] }
 >(): Promise<T> => {
@@ -383,8 +379,15 @@ export const resendTenantInvitation = async (inviteId: string): Promise<void> =>
   await post(`/api/v1/tenant-invitations/${inviteId}/resend`);
 };
 
-export const acceptTenantInvitation = async (token: string): Promise<void> => {
-  await post(`/api/v1/tenant-invitations/accept`, { token, accept_tos: true });
+export const acceptTenantInvitation = async (
+  token: string,
+  acceptNotifications = true
+): Promise<AcceptTenantInvitationResponse> => {
+  return await post<AcceptTenantInvitationResponse>(`/api/v1/tenant-invitations/accept`, {
+    token,
+    accept_tos: true,
+    accept_notifications: acceptNotifications,
+  });
 };
 
 /*

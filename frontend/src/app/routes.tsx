@@ -21,7 +21,7 @@ import AppLayout from "../components/layout/AppLayout";
 export const router = createBrowserRouter([
   { path: "/", element: <Navigate to="/tenant-gate" replace /> },
 
-  /* Public/Auth pages */
+  // Public/Auth pages
   { path: "/login", element: <Login /> },
   { path: "/verify", element: <Verify /> },
   { path: "/accept-invitation", element: <AcceptInvitation /> },
@@ -31,7 +31,7 @@ export const router = createBrowserRouter([
   { path: "/tenant-create", element: <TenantCreate /> },
   { path: "/profile-completion", element: <ProfileCompletion /> },
 
-  /* Application layout */
+  // Application layout
   {
     element: <AppLayout />,
     children: [

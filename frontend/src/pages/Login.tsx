@@ -1,4 +1,3 @@
-// frontend/src/pages/Login.tsx
 import React, { useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { PageShell } from "../components/PageShell";
@@ -11,11 +10,16 @@ import { useAuth } from "../auth/AuthContext";
 export default function Login() {
   const nav = useNavigate();
   const [params] = useSearchParams();
-  const { requestCode, setPendingEmail } = useAuth();
+  const { requestCode, setPendingEmail, setPendingInviteToken } = useAuth();
 
   const nextParam = useMemo(() => {
     const n = params.get("next");
     return n && n.trim().length > 0 ? n.trim() : null;
+  }, [params]);
+
+  const inviteToken = useMemo(() => {
+    const t = params.get("token");
+    return t && t.trim().length > 0 ? t.trim() : null;
   }, [params]);
 
   const [email, setEmail] = useState("");
@@ -23,7 +27,12 @@ export default function Login() {
   const [serverError, setServerError] = useState<string | null>(null);
 
   const emailNorm = useMemo(() => normalizeEmail(email), [email]);
-  const emailError = email.length === 0 ? undefined : isValidEmail(emailNorm) ? undefined : "Enter a valid email address.";
+  const emailError =
+    email.length === 0
+      ? undefined
+      : isValidEmail(emailNorm)
+        ? undefined
+        : "Enter a valid email address.";
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -39,20 +48,42 @@ export default function Login() {
       await requestCode(emailNorm);
       setPendingEmail(emailNorm);
 
-      // Preserve next param through verify step (nextParam is already encoded from /login?next=...)
-      nav(nextParam ? `/verify?next=${nextParam}` : "/verify");
+      if (inviteToken) {
+        setPendingInviteToken(inviteToken);
+      }
+
+      const verifyParams = new URLSearchParams();
+
+      if (nextParam) {
+        verifyParams.set("next", nextParam);
+      }
+
+      if (inviteToken) {
+        verifyParams.set("token", inviteToken);
+      }
+
+      const query = verifyParams.toString();
+      nav(query ? `/verify?${query}` : "/verify");
     } catch (err) {
-      if (err instanceof ApiError) setServerError(err.message);
-      else setServerError("Something went wrong. Please try again.");
+      if (err instanceof ApiError) {
+        setServerError(err.message);
+      } else {
+        setServerError("Something went wrong. Please try again.");
+      }
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <PageShell title="Sign in" subtitle="Enter your email and we’ll send a one-time verification code.">
+    <PageShell
+      title="Sign in"
+      subtitle="Enter your email and we’ll send a one-time verification code."
+    >
       {serverError ? (
-        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{serverError}</div>
+        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {serverError}
+        </div>
       ) : null}
 
       <form onSubmit={onSubmit} className="space-y-4">
@@ -70,7 +101,9 @@ export default function Login() {
           Send code
         </Button>
 
-        <div className="text-xs text-slate-500">By continuing, you agree to POSTIKA’s Terms and Privacy Policy.</div>
+        <div className="text-xs text-slate-500">
+          By continuing, you agree to POSTIKA’s Terms and Privacy Policy.
+        </div>
       </form>
     </PageShell>
   );

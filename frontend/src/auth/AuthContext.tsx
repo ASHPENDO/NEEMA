@@ -1,10 +1,11 @@
-// frontend/src/auth/AuthContext.tsx
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "../lib/api";
 import { pendingEmailStorage, tokenStorage } from "../lib/storage";
 import { activeTenantStorage } from "../lib/tenantStorage";
 import { clearTenantMembershipCache } from "../hooks/useTenantMembership";
 import type { AuthTokenResponse, MeResponse, UpdateMeRequest } from "./types";
+
+const PENDING_INVITE_TOKEN_KEY = "postika.pendingInviteToken";
 
 type AuthState = {
   isBootstrapping: boolean;
@@ -22,6 +23,9 @@ type AuthContextValue = AuthState & {
   getPendingEmail: () => string | null;
   setPendingEmail: (email: string) => void;
   clearPendingEmail: () => void;
+  getPendingInviteToken: () => string | null;
+  setPendingInviteToken: (token: string) => void;
+  clearPendingInviteToken: () => void;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -60,12 +64,42 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setMe(normalizeMe(data));
   }
 
+  function getPendingInviteToken() {
+    try {
+      const value = sessionStorage.getItem(PENDING_INVITE_TOKEN_KEY);
+      if (!value) return null;
+      const trimmed = String(value).trim();
+      return trimmed || null;
+    } catch {
+      return null;
+    }
+  }
+
+  function setPendingInviteToken(inviteToken: string) {
+    try {
+      const trimmed = String(inviteToken || "").trim();
+      if (!trimmed) return;
+      sessionStorage.setItem(PENDING_INVITE_TOKEN_KEY, trimmed);
+    } catch {
+      // no-op
+    }
+  }
+
+  function clearPendingInviteToken() {
+    try {
+      sessionStorage.removeItem(PENDING_INVITE_TOKEN_KEY);
+    } catch {
+      // no-op
+    }
+  }
+
   function logout() {
     try {
       tokenStorage.clear();
       pendingEmailStorage.clear();
       activeTenantStorage.clear();
       clearTenantMembershipCache();
+      clearPendingInviteToken();
 
       setToken(null);
       setMe(null);
@@ -159,6 +193,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       getPendingEmail,
       setPendingEmail,
       clearPendingEmail,
+      getPendingInviteToken,
+      setPendingInviteToken,
+      clearPendingInviteToken,
     }),
     [isBootstrapping, isAuthed, token, me]
   );

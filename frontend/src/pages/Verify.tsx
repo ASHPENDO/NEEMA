@@ -1,5 +1,4 @@
-// frontend/src/pages/Verify.tsx
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { PageShell } from "../components/PageShell";
 import { Input } from "../components/Input";
@@ -9,7 +8,6 @@ import { normalizeOtp } from "../lib/validators";
 import { useAuth } from "../auth/AuthContext";
 
 function safeNext(nextParam: string | null): string {
-  // Only allow internal paths to prevent open redirects
   if (!nextParam) return "/tenant-gate";
   if (nextParam.startsWith("/") && !nextParam.startsWith("//")) return nextParam;
   return "/tenant-gate";
@@ -19,7 +17,13 @@ export default function Verify() {
   const nav = useNavigate();
   const [params] = useSearchParams();
 
-  const { getPendingEmail, clearPendingEmail, requestCode, verifyCode } = useAuth();
+  const {
+    getPendingEmail,
+    clearPendingEmail,
+    requestCode,
+    verifyCode,
+    setPendingInviteToken,
+  } = useAuth();
 
   const pendingEmail = getPendingEmail();
 
@@ -29,10 +33,16 @@ export default function Verify() {
   }, [params]);
 
   const nextPath = useMemo(() => {
-    // decode once so "/accept-invitation?token=..." is a real path again
     const decoded = nextParam ? decodeURIComponent(nextParam) : null;
     return safeNext(decoded);
   }, [nextParam]);
+
+  useEffect(() => {
+    const token = params.get("token");
+    if (token && token.trim()) {
+      setPendingInviteToken(token.trim());
+    }
+  }, [params, setPendingInviteToken]);
 
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
@@ -41,7 +51,8 @@ export default function Verify() {
   const [info, setInfo] = useState<string | null>(null);
 
   const otp = useMemo(() => normalizeOtp(code), [code]);
-  const otpError = code.length === 0 ? undefined : otp.length < 4 ? "Enter the code from your email." : undefined;
+  const otpError =
+    code.length === 0 ? undefined : otp.length < 4 ? "Enter the code from your email." : undefined;
 
   async function onVerify(e: React.FormEvent) {
     e.preventDefault();
@@ -63,8 +74,6 @@ export default function Verify() {
     try {
       await verifyCode(pendingEmail, otp);
       clearPendingEmail();
-
-      // Go to next if provided; otherwise funnel to tenant-gate
       nav(nextPath, { replace: true });
     } catch (err) {
       if (err instanceof ApiError) setServerError(err.message);
@@ -97,13 +106,24 @@ export default function Verify() {
   }
 
   return (
-    <PageShell title="Verify code" subtitle={pendingEmail ? `Enter the code sent to ${pendingEmail}.` : "Enter the code from your email."}>
+    <PageShell
+      title="Verify code"
+      subtitle={
+        pendingEmail
+          ? `Enter the code sent to ${pendingEmail}.`
+          : "Enter the code from your email."
+      }
+    >
       {serverError ? (
-        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{serverError}</div>
+        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {serverError}
+        </div>
       ) : null}
 
       {info ? (
-        <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">{info}</div>
+        <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+          {info}
+        </div>
       ) : null}
 
       <form onSubmit={onVerify} className="space-y-4">
@@ -121,7 +141,13 @@ export default function Verify() {
           Verify & continue
         </Button>
 
-        <Button type="button" variant="secondary" loading={resending} onClick={onResend} className="w-full">
+        <Button
+          type="button"
+          variant="secondary"
+          loading={resending}
+          onClick={onResend}
+          className="w-full"
+        >
           Resend code
         </Button>
 

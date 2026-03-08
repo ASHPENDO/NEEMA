@@ -1,4 +1,3 @@
-// frontend/src/pages/ProfileCompletion.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { PageShell } from "../components/PageShell";
@@ -18,15 +17,13 @@ function safeInternalPath(p: string | null | undefined): string | null {
 export default function ProfileCompletion() {
   const nav = useNavigate();
   const [params] = useSearchParams();
-  const { me, updateMe } = useAuth();
+  const { me, updateMe, getPendingInviteToken } = useAuth();
 
   const next = useMemo(() => safeInternalPath(params.get("next")), [params]);
 
-  // Backend expects: full_name, phone_e164, country (optional)
-  // Note: me currently may not have full_name/phone_e164 yet; keep safe fallbacks.
   const [fullName, setFullName] = useState((me as any)?.full_name ?? "");
   const [phoneE164, setPhoneE164] = useState((me as any)?.phone_e164 ?? "");
-  const [password, setPassword] = useState(""); // optional UI-only for now (NOT sent to PATCH /auth/me)
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
 
@@ -39,18 +36,23 @@ export default function ProfileCompletion() {
   const phoneErr = useMemo(() => {
     const p = phoneE164.trim();
     if (!p) return "Phone number is required.";
-    // Expect E.164 (e.g. +2547xxxxxxx)
     if (!p.startsWith("+")) return "Use international format, e.g. +2547...";
     if (p.length < 10) return "Enter a valid E.164 phone number.";
     return undefined;
   }, [phoneE164]);
 
-  // If already complete, avoid trapping user (navigate via effect, not during render)
   useEffect(() => {
     if (isProfileComplete(me)) {
+      const pendingInviteToken = getPendingInviteToken();
+      if (pendingInviteToken) {
+        nav(`/accept-invitation?token=${encodeURIComponent(pendingInviteToken)}`, {
+          replace: true,
+        });
+        return;
+      }
       nav(next ?? "/tenant-gate", { replace: true });
     }
-  }, [me, nav, next]);
+  }, [me, nav, next, getPendingInviteToken]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -60,19 +62,22 @@ export default function ProfileCompletion() {
 
     setLoading(true);
     try {
-      // IMPORTANT:
-      // - Only send fields allowed by backend schema (no extras)
-      // - Do NOT send password here (backend forbids extra keys)
       await updateMe({
         full_name: fullName.trim(),
         phone_e164: phoneE164.trim(),
-        country: "KE", // optional; remove if you prefer not to set automatically
+        country: "KE",
       });
 
-      // Clear optional password field (since it's not persisted yet)
       setPassword("");
 
-      // Redirect to next EXACTLY (e.g. /accept-invitation?token=...)
+      const pendingInviteToken = getPendingInviteToken();
+      if (pendingInviteToken) {
+        nav(`/accept-invitation?token=${encodeURIComponent(pendingInviteToken)}`, {
+          replace: true,
+        });
+        return;
+      }
+
       nav(next ?? "/tenant-gate", { replace: true });
     } catch (err) {
       if (err instanceof ApiError) setServerError(err.message);
@@ -83,7 +88,10 @@ export default function ProfileCompletion() {
   }
 
   return (
-    <PageShell title="Complete your profile" subtitle="Add your basic details to finish setting up your account.">
+    <PageShell
+      title="Complete your profile"
+      subtitle="Add your basic details to finish setting up your account."
+    >
       {serverError ? (
         <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {serverError}
