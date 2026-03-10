@@ -1,5 +1,3 @@
-# backend/app/core/config.py
-
 from __future__ import annotations
 
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -66,6 +64,27 @@ class Settings(BaseSettings):
     IMAGE_WEBP_QUALITY: int = 82
 
     # -----------------------------
+    # Meta OAuth / Graph API
+    # -----------------------------
+    META_APP_ID: str | None = None
+    META_APP_SECRET: str | None = None
+    META_REDIRECT_URI: str = "http://127.0.0.1:8000/api/v1/social/facebook/callback"
+    META_GRAPH_API_VERSION: str = "v23.0"
+    META_SCOPES: str = (
+        "pages_show_list,"
+        "pages_read_engagement,"
+        "pages_manage_posts,"
+        "business_management,"
+        "instagram_basic,"
+        "instagram_content_publish,"
+        "whatsapp_business_management,"
+        "whatsapp_business_messaging"
+    )
+
+    # Optional frontend callback target for later UX handoff
+    FRONTEND_SOCIAL_CALLBACK_URL: str | None = None
+
+    # -----------------------------
     # AWS S3 / S3-compatible
     # -----------------------------
     AWS_S3_BUCKET: str | None = None
@@ -115,6 +134,18 @@ class Settings(BaseSettings):
     @property
     def STORAGE_PROVIDER_NORMALIZED(self) -> str:
         return (self.STORAGE_PROVIDER or "local").strip().lower()
+
+    @property
+    def META_GRAPH_BASE_URL(self) -> str:
+        return f"https://graph.facebook.com/{self.META_GRAPH_API_VERSION}"
+
+    @property
+    def META_OAUTH_DIALOG_URL(self) -> str:
+        return f"https://www.facebook.com/{self.META_GRAPH_API_VERSION}/dialog/oauth"
+
+    @property
+    def META_SCOPE_LIST(self) -> list[str]:
+        return [s.strip() for s in (self.META_SCOPES or "").split(",") if s.strip()]
 
     def model_post_init(self, __context) -> None:
         env = (self.ENVIRONMENT or "").strip().lower()

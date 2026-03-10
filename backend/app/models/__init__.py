@@ -11,3 +11,7 @@ from app.models.salesperson_profile import SalespersonProfile  # noqa: F401
 
 # Phase 4 — catalog
 from app.models.catalog_item import CatalogItem  # noqa: F401
+
+# Phase 5 — social oauth
+from app.models.social_connection import SocialConnection  # noqa: F401
+from app.models.social_platform_account import SocialPlatformAccount  # noqa: F401

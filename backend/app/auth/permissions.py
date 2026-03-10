@@ -1,4 +1,3 @@
-# app/auth/permissions.py
 from __future__ import annotations
 
 from enum import StrEnum
@@ -21,6 +20,14 @@ class Permission(StrEnum):
 
     PRODUCT_BULK_UPLOAD = "product:bulk_upload"  # zip/import
     PRODUCT_SCRAPE = "product:scrape"  # website scrape/import
+
+    # -------------------------
+    # Social OAuth / connections
+    # -------------------------
+    SOCIAL_READ = "social:read"
+    SOCIAL_CONNECT = "social:connect"
+    SOCIAL_DISCONNECT = "social:disconnect"
+    SOCIAL_REFRESH = "social:refresh"
 
     # -------------------------
     # Publishing & automation
@@ -102,7 +109,7 @@ ALL_PERMISSIONS: FrozenSet[str] = frozenset(p.value for p in Permission)
 # -------------------------
 
 # STAFF: everything marketing execution, but NO deletes (safety),
-# and NO billing/security/member-management.
+# and NO billing/security/member-management/social connection management.
 STAFF_MARKETING_EXECUTION: FrozenSet[str] = frozenset(
     {
         # ✅ Members:read is allowed to ALL roles (visibility)
@@ -112,14 +119,11 @@ STAFF_MARKETING_EXECUTION: FrozenSet[str] = frozenset(
         Permission.CATALOG_READ.value,
         Permission.CATALOG_CREATE.value,
         Permission.CATALOG_UPDATE.value,
-        # NO: Permission.CATALOG_DELETE
 
         # Products
         Permission.PRODUCT_READ.value,
         Permission.PRODUCT_CREATE.value,
         Permission.PRODUCT_UPDATE.value,
-        # NO: Permission.PRODUCT_DELETE
-
         Permission.PRODUCT_BULK_UPLOAD.value,
         Permission.PRODUCT_SCRAPE.value,
 
@@ -132,8 +136,6 @@ STAFF_MARKETING_EXECUTION: FrozenSet[str] = frozenset(
         # AI studio
         Permission.AI_ENHANCE.value,
         Permission.AI_GENERATE.value,
-        # Optional approval gate:
-        # Permission.AI_APPROVE.value,
 
         # Inbox
         Permission.INBOX_READ.value,
@@ -148,8 +150,6 @@ STAFF_MARKETING_EXECUTION: FrozenSet[str] = frozenset(
         Permission.CAMPAIGN_CREATE.value,
         Permission.CAMPAIGN_UPDATE.value,
         Permission.CAMPAIGN_PAUSE_RESUME.value,
-        # NO: Permission.CAMPAIGN_DELETE
-
         Permission.PDA_READ.value,
         Permission.PDA_CONFIGURE.value,
 
@@ -159,25 +159,27 @@ STAFF_MARKETING_EXECUTION: FrozenSet[str] = frozenset(
 )
 
 # MANAGER: lead for ops; can export analytics, configure reports, manage inbox routing/templates.
-# Still NO deletes by default (keeps "delete" as an ADMIN/OWNER responsibility).
+# No social connection management in first pass.
 MANAGER_EXTRA: FrozenSet[str] = frozenset(
     {
         Permission.ANALYTICS_EXPORT.value,
         Permission.REPORTS_CONFIGURE.value,
         Permission.INBOX_ASSIGN.value,
         Permission.INBOX_TEMPLATES.value,
-        # Optional: approval gate (enable if you want review-before-publish)
-        # Permission.AI_APPROVE.value,
     }
 )
 
 # ADMIN: operational admin.
-# IMPORTANT: As per policy, ADMIN/MANAGER/STAFF must NOT be able to invite members.
+# ADMIN may manage social connections.
 # Member invites + role changes + deactivation remain OWNER-only governance.
 ADMIN_EXTRA: FrozenSet[str] = frozenset(
     {
         Permission.MEMBERS_READ.value,
         Permission.AUDIT_LOGS_READ.value,
+        Permission.SOCIAL_READ.value,
+        Permission.SOCIAL_CONNECT.value,
+        Permission.SOCIAL_DISCONNECT.value,
+        Permission.SOCIAL_REFRESH.value,
     }
 )
 
@@ -243,12 +245,9 @@ SENSITIVE_PERMISSIONS: FrozenSet[str] = frozenset(
 # Backwards-compatible PERM shim (legacy PERM.TENANT_* constants)
 # -------------------------------------------------------------------
 class _LegacyPERM:
-    # NOTE: Previously this pointed to invite; keep it but understand it is OWNER-only now.
     TENANT_WRITE = Permission.MEMBERS_INVITE.value
-
     TENANT_MEMBERS_READ = Permission.MEMBERS_READ.value
     TENANT_MEMBERS_WRITE = Permission.MEMBERS_UPDATE_ROLE.value
-
     TENANT_INVITES_MANAGE = Permission.MEMBERS_INVITE.value
 
 

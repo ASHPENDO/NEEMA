@@ -3,6 +3,7 @@ import React from "react";
 import { PageShell } from "../components/PageShell";
 import { useAuth } from "../auth/AuthContext";
 import { useAccess } from "../hooks/useAccess";
+import MetaConnectButton from "../components/MetaConnectButton";
 
 export default function Dashboard() {
   const { me } = useAuth();
@@ -16,12 +17,16 @@ export default function Dashboard() {
       <div className="grid gap-4 md:grid-cols-3">
         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
           <div className="text-sm font-semibold text-slate-900">Active tenant</div>
-          <div className="mt-2 break-all text-sm text-slate-700">{tenantId || "—"}</div>
+          <div className="mt-2 break-all text-sm text-slate-700">
+            {tenantId || "—"}
+          </div>
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
           <div className="text-sm font-semibold text-slate-900">Role</div>
-          <div className="mt-2 text-sm text-slate-700">{ready ? membership?.role ?? "—" : "Resolving..."}</div>
+          <div className="mt-2 text-sm text-slate-700">
+            {ready ? membership?.role ?? "—" : "Resolving..."}
+          </div>
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
@@ -36,8 +41,20 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* META CONNECT TEST SECTION */}
+      <div className="mt-6 rounded-2xl border border-blue-200 bg-blue-50 p-4">
+        <div className="text-sm font-semibold text-blue-900">
+          Social Integrations (Testing)
+        </div>
+        <div className="mt-3">
+          <MetaConnectButton />
+        </div>
+      </div>
+
       <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-        <div className="text-sm font-semibold text-slate-900">Current membership</div>
+        <div className="text-sm font-semibold text-slate-900">
+          Current membership
+        </div>
         <pre className="mt-2 overflow-auto text-xs text-slate-700">
           {JSON.stringify(membership, null, 2)}
         </pre>
