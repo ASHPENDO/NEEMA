@@ -1,4 +1,3 @@
-# app/api/v1/social_oauth_meta.py
 from __future__ import annotations
 
 import secrets
@@ -14,6 +13,8 @@ from app.core.config import settings
 router = APIRouter(prefix="/social/meta", tags=["social-oauth-meta"])
 
 META_GRAPH_VERSION = "v25.0"
+
+# Force the standard full-page Facebook OAuth endpoint.
 META_OAUTH_URL = f"https://www.facebook.com/{META_GRAPH_VERSION}/dialog/oauth"
 META_TOKEN_URL = f"https://graph.facebook.com/{META_GRAPH_VERSION}/oauth/access_token"
 META_GRAPH_BASE = f"https://graph.facebook.com/{META_GRAPH_VERSION}"
@@ -27,7 +28,6 @@ def utcnow() -> datetime:
 
 
 def build_meta_scopes() -> str:
-    # Keep the first real flow minimal until Page discovery works.
     return ",".join([
         "pages_show_list",
         "pages_read_engagement",
@@ -53,6 +53,7 @@ async def connect_meta(
         "state": state,
         "scope": build_meta_scopes(),
         "response_type": "code",
+        "display": "page",
     }
 
     auth_url = f"{META_OAUTH_URL}?{urlencode(params)}"
@@ -78,7 +79,7 @@ async def meta_callback(
     error_message: str | None = Query(default=None),
 ):
     print("META CALLBACK HIT")
-    print("code =", code)
+    print("code present =", bool(code))
     print("state =", state)
     print("error =", error)
     print("error_reason =", error_reason)
@@ -86,7 +87,6 @@ async def meta_callback(
     print("error_code =", error_code)
     print("error_message =", error_message)
 
-    # Handle both classic OAuth error fields and Meta's error_code/error_message style
     if error or error_code or error_message:
         raise HTTPException(
             status_code=400,
@@ -119,7 +119,11 @@ async def meta_callback(
         )
         token_resp.raise_for_status()
         short_token_data = token_resp.json()
-        print("SHORT TOKEN RESPONSE =", short_token_data)
+
+        if "access_token" not in short_token_data:
+            raise HTTPException(status_code=400, detail="Meta did not return short-lived access token")
+
+        print("SHORT TOKEN EXCHANGE SUCCESS")
 
         short_lived_token = short_token_data["access_token"]
 
@@ -135,15 +139,15 @@ async def meta_callback(
         )
         long_resp.raise_for_status()
         long_token_data = long_resp.json()
-        print("LONG TOKEN RESPONSE =", long_token_data)
+
+        if "access_token" not in long_token_data:
+            raise HTTPException(status_code=400, detail="Meta did not return long-lived access token")
+
+        print("LONG TOKEN EXCHANGE SUCCESS")
 
         long_lived_token = long_token_data["access_token"]
         expires_in = long_token_data.get("expires_in")
-        token_expires_at = (
-            utcnow() + timedelta(seconds=expires_in)
-            if expires_in
-            else None
-        )
+        token_expires_at = utcnow() + timedelta(seconds=expires_in) if expires_in else None
 
         # 3) Get user profile
         me_resp = await client.get(
@@ -167,7 +171,7 @@ async def meta_callback(
         )
         pages_resp.raise_for_status()
         pages_json = pages_resp.json()
-        print("PAGES RESPONSE =", pages_json)
+        print("PAGES FOUND =", len(pages_json.get("data", [])))
 
         pages_data = pages_json.get("data", [])
 
@@ -186,14 +190,14 @@ async def meta_callback(
             )
             page_detail_resp.raise_for_status()
             page_detail = page_detail_resp.json()
-            print(f"PAGE DETAIL RESPONSE {page_id} =", page_detail)
+            print(f"PAGE DETAIL FETCHED FOR PAGE {page_id}")
 
             page_record = {
                 "page_id": page["id"],
                 "page_name": page["name"],
-                "page_access_token": page.get("access_token"),
                 "category": page.get("category"),
                 "tasks": page.get("tasks", []),
+                "has_page_access_token": bool(page.get("access_token")),
             }
             discovered_pages.append(page_record)
 
