@@ -24,3 +24,8 @@ from app.models.facebook_catalog import FacebookCatalog  # noqa: F401
 
 # ✅ NEW — Meta Catalogs (CRITICAL)
 from app.models.meta_catalog import MetaCatalog  # noqa: F401
+
+# Phase 6 — posting & campaigns
+
+from app.models.post_history import PostHistory  # noqa: F401
+from app.models.campaign import Campaign  # noqa: F401

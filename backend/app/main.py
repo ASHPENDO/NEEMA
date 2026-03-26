@@ -15,6 +15,13 @@ from app.api.v1.catalog import router as catalog_router
 from app.api.v1.social_oauth import router as social_oauth_router
 from app.api.v1.facebook_catalog import router as facebook_catalog_router
 
+# ✅ Unified posting
+from app.api.v1.endpoints.posting import router as posting_router
+
+# ✅ Scheduler
+import asyncio
+from app.services.scheduler import campaign_scheduler
+
 
 def create_application() -> FastAPI:
     app = FastAPI(title="POSTIKA API")
@@ -38,9 +45,15 @@ def create_application() -> FastAPI:
     def root():
         return {"status": "ok", "service": "postika"}
 
+    # ✅ Scheduler startup hook
+    @app.on_event("startup")
+    async def start_scheduler():
+        asyncio.create_task(campaign_scheduler())
+
     if settings.STORAGE_PROVIDER_NORMALIZED == "local":
         app.mount(settings.MEDIA_URL, StaticFiles(directory=settings.MEDIA_ROOT), name="media")
 
+    # Core routers
     app.include_router(auth_router, prefix="/api/v1")
     app.include_router(tenants_router, prefix="/api/v1")
     app.include_router(tenant_invitations_router, prefix="/api/v1")
@@ -50,8 +63,11 @@ def create_application() -> FastAPI:
     app.include_router(catalog_router, prefix="/api/v1")
     app.include_router(social_oauth_router, prefix="/api/v1")
 
-    # ✅ Facebook Catalog
+    # Facebook Catalog
     app.include_router(facebook_catalog_router, prefix="/api/v1")
+
+    # ✅ Unified Posting System
+    app.include_router(posting_router, prefix="/api/v1")
 
     return app
 
