@@ -1,9 +1,10 @@
 # app/models/campaign.py
 
 import uuid
-from sqlalchemy import Column, String, DateTime, Text
-from sqlalchemy.dialects.postgresql import UUID
 from datetime import datetime
+
+from sqlalchemy import Column, String, DateTime, Text
+from sqlalchemy.dialects.postgresql import UUID, JSON
 
 from app.db.base import Base
 
@@ -17,12 +18,19 @@ class Campaign(Base):
 
     name = Column(String, nullable=False)
 
-    platform = Column(String, nullable=False)
-    page_id = Column(String, nullable=True)
+    # MULTI-PLATFORM SUPPORT
+    platforms = Column(JSON, nullable=False)  # ["facebook", "instagram"]
+
+    # MULTI-PAGE SUPPORT
+    page_ids = Column(JSON, nullable=False)  # ["page1", "page2"]
 
     caption = Column(Text, nullable=False)
     image_url = Column(Text, nullable=True)
 
     scheduled_at = Column(DateTime, nullable=False)
+
+    # EXECUTION TRACKING (CRITICAL)
+    status = Column(String, default="scheduled")  
+    # scheduled | processing | posted | failed
 
     created_at = Column(DateTime, default=datetime.utcnow)

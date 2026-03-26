@@ -1,39 +1,33 @@
-# app/services/scheduler.py
-
-import asyncio
-from datetime import datetime
 from sqlalchemy import select
-
-from app.db.session import async_session_factory
+from datetime import datetime
 from app.models.campaign import Campaign
-from app.services.posting.service import PostService
+from app.services.campaign_service import CampaignService
 
 
-async def campaign_scheduler():
+async def run_scheduler(db):
     while True:
-        async with async_session_factory() as db:
+        now = datetime.utcnow()
 
-            result = await db.execute(
-                select(Campaign).where(Campaign.scheduled_at <= datetime.utcnow())
+        result = await db.execute(
+            select(Campaign).where(
+                Campaign.status == "scheduled",
+                Campaign.scheduled_at <= now
             )
-            campaigns = result.scalars().all()
+        )
 
-            for campaign in campaigns:
-                payload = {
-                    "platform": campaign.platform,
-                    "page_id": campaign.page_id,
-                    "caption": campaign.caption,
-                    "image_url": campaign.image_url,
-                }
+        campaigns = result.scalars().all()
 
-                try:
-                    await PostService.publish(payload, campaign.tenant_id, db)
+        for campaign in campaigns:
+            service = CampaignService(db)
 
-                    # Optional: delete or mark executed
-                    await db.delete(campaign)
-                    await db.commit()
+            try:
+                campaign.status = "processing"
+                await db.commit()
 
-                except Exception:
-                    continue
+                await service.execute_campaign(campaign)
 
-        await asyncio.sleep(30)  # check every 30s
+            except Exception:
+                campaign.status = "failed"
+                await db.commit()
+
+        await asyncio.sleep(10)

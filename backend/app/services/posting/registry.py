@@ -1,9 +1,12 @@
 # app/services/posting/registry.py
 
-from app.services.posting.platforms.facebook import FacebookPoster
+from app.services.posting.platforms.facebook import FacebookAdapter
+
+# Placeholder for future
+# from app.services.posting.platforms.instagram import InstagramAdapter
+
 
 PLATFORM_REGISTRY = {
-    "facebook": FacebookPoster(),
-    # "instagram": InstagramPoster(),  ← plug later
-    # "tiktok": TikTokPoster(),
+    "facebook": FacebookAdapter(),
+    # "instagram": InstagramAdapter(),  # enable when ready
 }
