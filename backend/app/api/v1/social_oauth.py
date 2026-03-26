@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Query, HTTPException
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Query, HTTPException, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.models.social_account import SocialAccount
 
@@ -61,6 +61,7 @@ async def meta_callback(
     error_description: str | None = Query(default=None),
     error_code: str | None = Query(default=None),
     error_message: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),  # ✅ FIX
 ):
     print("META CALLBACK HIT")
 
@@ -130,10 +131,7 @@ async def meta_callback(
         pages_data = pages_json.get("data", [])
         print("PAGES FOUND =", len(pages_data))
 
-    # ✅ STORE IN DB
-    db_gen = get_db()
-    db: Session = next(db_gen)
-
+    # ✅ STORE IN DB (ASYNC SAFE)
     try:
         for page in pages_data:
             account = SocialAccount(
@@ -147,15 +145,12 @@ async def meta_callback(
             )
             db.add(account)
 
-        db.commit()
+        await db.commit()   # ✅ FIX
 
     except Exception as e:
-        db.rollback()
+        await db.rollback()  # ✅ FIX
         print("DB SAVE ERROR =", str(e))
         raise
-
-    finally:
-        db.close()
 
     return {
         "status": "connected",
