@@ -18,6 +18,9 @@ from app.models.catalog_item import CatalogItem  # noqa: F401
 from app.models.social_connection import SocialConnection  # noqa: F401
 from app.models.social_platform_account import SocialPlatformAccount  # noqa: F401
 
-# ✅ NEW — Facebook Catalog + OAuth persistence
+# ✅ Facebook OAuth + persistence
 from app.models.social_account import SocialAccount  # noqa: F401
 from app.models.facebook_catalog import FacebookCatalog  # noqa: F401
+
+# ✅ NEW — Meta Catalogs (CRITICAL)
+from app.models.meta_catalog import MetaCatalog  # noqa: F401

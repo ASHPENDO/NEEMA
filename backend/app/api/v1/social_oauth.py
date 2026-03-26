@@ -1,7 +1,10 @@
 from fastapi import APIRouter, Query, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+
 from app.db.session import get_db
 from app.models.social_account import SocialAccount
+from app.models.meta_catalog import MetaCatalog
 
 import httpx
 from datetime import datetime, timezone, timedelta
@@ -18,7 +21,7 @@ META_GRAPH_BASE = "https://graph.facebook.com/v19.0"
 router = APIRouter(prefix="/social/meta", tags=["social-oauth"])
 
 
-# ✅ STEP 1 — CONNECT (ENTRY POINT)
+# ✅ STEP 1 — CONNECT (UPDATED WITH CATALOG SCOPE)
 @router.get("/connect")
 def meta_connect(tenant_id: str, user_id: str):
     state = f"{tenant_id}:{user_id}"
@@ -51,7 +54,7 @@ async def meta_get(client, url, params, label="META"):
     return data
 
 
-# ✅ STEP 2 — CALLBACK
+# ✅ STEP 2 — CALLBACK (UNCHANGED BUT CLEAN)
 @router.get("/callback")
 async def meta_callback(
     code: str | None = Query(default=None),
@@ -61,7 +64,7 @@ async def meta_callback(
     error_description: str | None = Query(default=None),
     error_code: str | None = Query(default=None),
     error_message: str | None = Query(default=None),
-    db: AsyncSession = Depends(get_db),  # ✅ FIX
+    db: AsyncSession = Depends(get_db),
 ):
     print("META CALLBACK HIT")
 
@@ -131,7 +134,7 @@ async def meta_callback(
         pages_data = pages_json.get("data", [])
         print("PAGES FOUND =", len(pages_data))
 
-    # ✅ STORE IN DB (ASYNC SAFE)
+    # ✅ STORE PAGES
     try:
         for page in pages_data:
             account = SocialAccount(
@@ -145,10 +148,10 @@ async def meta_callback(
             )
             db.add(account)
 
-        await db.commit()   # ✅ FIX
+        await db.commit()
 
     except Exception as e:
-        await db.rollback()  # ✅ FIX
+        await db.rollback()
         print("DB SAVE ERROR =", str(e))
         raise
 
@@ -156,4 +159,89 @@ async def meta_callback(
         "status": "connected",
         "tenant_id": state_data["tenant_id"],
         "pages_saved": len(pages_data),
+    }
+
+
+# ✅ STEP 3 — FETCH & STORE CATALOGS
+@router.get("/catalogs")
+async def fetch_meta_catalogs(
+    tenant_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Fetch businesses and catalogs for a tenant and store them
+    """
+
+    # 1. Get tenant Meta token
+    result = await db.execute(
+        select(SocialAccount).where(SocialAccount.tenant_id == tenant_id)
+    )
+    account = result.scalars().first()
+
+    if not account:
+        raise HTTPException(status_code=404, detail="Meta not connected")
+
+    access_token = account.access_token
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+
+        # 2. Get businesses
+        businesses = await meta_get(
+            client,
+            f"{META_GRAPH_BASE}/me/businesses",
+            {"access_token": access_token},
+            label="BUSINESSES",
+        )
+
+        business_list = businesses.get("data", [])
+
+        all_catalogs = []
+
+        # 3. Loop businesses → catalogs
+        for biz in business_list:
+            biz_id = biz.get("id")
+
+            catalogs = await meta_get(
+                client,
+                f"{META_GRAPH_BASE}/{biz_id}/owned_product_catalogs",
+                {"access_token": access_token},
+                label="CATALOGS",
+            )
+
+            catalog_list = catalogs.get("data", [])
+
+            for cat in catalog_list:
+
+                # 🔥 PREVENT DUPLICATES
+                existing = await db.execute(
+                    select(MetaCatalog).where(
+                        MetaCatalog.catalog_id == cat.get("id"),
+                        MetaCatalog.tenant_id == tenant_id,
+                    )
+                )
+
+                if existing.scalars().first():
+                    continue
+
+                catalog_obj = MetaCatalog(
+                    tenant_id=tenant_id,
+                    business_id=biz_id,
+                    catalog_id=cat.get("id"),
+                    catalog_name=cat.get("name"),
+                )
+
+                db.add(catalog_obj)
+
+                all_catalogs.append({
+                    "business_id": biz_id,
+                    "catalog_id": cat.get("id"),
+                    "catalog_name": cat.get("name"),
+                })
+
+        await db.commit()
+
+    return {
+        "status": "success",
+        "total_catalogs": len(all_catalogs),
+        "catalogs": all_catalogs,
     }
