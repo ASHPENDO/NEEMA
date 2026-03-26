@@ -1,23 +1,22 @@
 # alembic/env.py
 from logging.config import fileConfig
-import os
 
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 
 from alembic import context
 
-# this is the Alembic Config object, which provides
-# access to the values within the .ini file in use.
+# this is the Alembic Config object
 config = context.config
 
-# Interpret the config file for Python logging.
-# This line sets up loggers basically.
+# Logging
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# add your model's MetaData object here
-# for 'autogenerate' support
+# ✅ Import app config (single source of truth)
+from app.core.config import settings  # noqa: E402
+
+# Models
 from app.db.base import Base  # noqa: E402
 import app.models  # noqa: F401, E402
 
@@ -36,15 +35,16 @@ def include_object(object_, name, type_, reflected, compare_to):
 
 def _get_db_url() -> str:
     """
-    Prefer DATABASE_URL_SYNC (e.g. Neon) if set, otherwise fall back to alembic.ini.
-    This keeps local dev flexible while supporting Codespaces/cloud DBs.
+    Always use application database config.
+    This eliminates env/alembic.ini mismatch completely.
     """
-    return os.getenv("DATABASE_URL_SYNC") or config.get_main_option("sqlalchemy.url")
+    return settings.DATABASE_URL_SYNC
 
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode."""
     url = _get_db_url()
+
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -60,10 +60,12 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode."""
-    # Override sqlalchemy.url from env so engine_from_config uses it
-    db_url = os.getenv("DATABASE_URL_SYNC")
-    if db_url:
-        config.set_main_option("sqlalchemy.url", db_url)
+
+    # ✅ Force Alembic to use same DB as app
+    config.set_main_option(
+        "sqlalchemy.url",
+        settings.DATABASE_URL_SYNC
+    )
 
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),

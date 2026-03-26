@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
-import app.models  # noqa: F401  # force model registration
+import app.models  # noqa: F401
 
 from app.api.v1.auth import router as auth_router
 from app.api.v1.tenants import router as tenants_router
@@ -13,6 +13,7 @@ from app.api.v1.sales import router as sales_router
 from app.api.v1.platform_sales import router as platform_sales_router
 from app.api.v1.catalog import router as catalog_router
 from app.api.v1.social_oauth import router as social_oauth_router
+from app.api.v1.facebook_catalog import router as facebook_catalog_router
 
 
 def create_application() -> FastAPI:
@@ -37,7 +38,6 @@ def create_application() -> FastAPI:
     def root():
         return {"status": "ok", "service": "postika"}
 
-    # Local dev/public media serving
     if settings.STORAGE_PROVIDER_NORMALIZED == "local":
         app.mount(settings.MEDIA_URL, StaticFiles(directory=settings.MEDIA_ROOT), name="media")
 
@@ -49,6 +49,9 @@ def create_application() -> FastAPI:
     app.include_router(platform_sales_router, prefix="/api/v1")
     app.include_router(catalog_router, prefix="/api/v1")
     app.include_router(social_oauth_router, prefix="/api/v1")
+
+    # ✅ Facebook Catalog
+    app.include_router(facebook_catalog_router, prefix="/api/v1")
 
     return app
 
