@@ -22,7 +22,6 @@ class PostService:
 
         results = []
 
-        # Normalize payload (support both single + multi)
         platforms = (
             payload.platforms
             if hasattr(payload, "platforms")
@@ -46,44 +45,55 @@ class PostService:
 
             for page_id in page_ids:
 
-                print(f"[PostService] Looking up account: {platform} / {page_id}")
+                # 🔥 DEBUG (CRITICAL)
+                print(
+                    f"[DEBUG] tenant_id={tenant_id}, "
+                    f"platform={platform}, "
+                    f"page_id={page_id}"
+                )
+
+                page_id_str = str(page_id).strip()
+
+                print(f"[PostService] Looking up account: {platform} / {page_id_str}")
 
                 result = await db.execute(
                     select(SocialAccount).where(
                         SocialAccount.tenant_id == tenant_id,
                         SocialAccount.platform == platform,
-                        SocialAccount.page_id == page_id,
+                        SocialAccount.page_id == page_id_str,
                     )
                 )
                 social_account = result.scalars().first()
 
+                print(f"[DEBUG] Query result: {social_account}")
+
                 if not social_account:
-                    print(f"[PostService] ❌ No social account for {platform} / {page_id}")
+                    print(f"[PostService] ❌ No social account for {platform} / {page_id_str}")
                     continue
 
                 print(f"[PostService] ✅ Social account found")
 
-                # ✅ FIX: Convert URL → string
                 image_url_str = (
-                    str(payload.image_url) if getattr(payload, "image_url", None) else None
+                    str(payload.image_url)
+                    if getattr(payload, "image_url", None)
+                    else None
                 )
 
                 history = PostHistory(
                     tenant_id=tenant_id,
                     platform=platform,
-                    page_id=page_id,
+                    page_id=page_id_str,
                     caption=payload.caption,
                     image_url=image_url_str,
                     status="pending",
                 )
 
                 try:
-                    # 🔥 Wrap everything in one transaction block
                     db.add(history)
                     await db.commit()
                     await db.refresh(history)
 
-                    print(f"[PostService] 🚀 Posting to {platform} / {page_id}")
+                    print(f"[PostService] 🚀 Posting to {platform} / {page_id_str}")
 
                     result = await poster.post(payload, social_account)
 
@@ -97,18 +107,16 @@ class PostService:
 
                     results.append({
                         "platform": platform,
-                        "page_id": page_id,
+                        "page_id": page_id_str,
                         "status": "success",
                         "history_id": str(history.id),
                     })
 
                 except Exception as e:
-                    print(f"[PostService ERROR] {platform} / {page_id}: {e}")
+                    print(f"[PostService ERROR] {platform} / {page_id_str}: {e}")
 
-                    # 🔥 CRITICAL: reset broken transaction
                     await db.rollback()
 
-                    # Re-attach history safely
                     history.status = "failed"
                     history.error_message = str(e)
 
@@ -117,7 +125,7 @@ class PostService:
 
                     results.append({
                         "platform": platform,
-                        "page_id": page_id,
+                        "page_id": page_id_str,
                         "status": "failed",
                         "error": str(e),
                     })

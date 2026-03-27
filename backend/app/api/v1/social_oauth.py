@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Query, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from urllib.parse import urlencode
 
 from app.db.session import get_db
 from app.models.social_account import SocialAccount
@@ -11,7 +12,7 @@ from datetime import datetime, timezone, timedelta
 
 from app.core.config import settings
 
-# 🔐 In-memory OAuth state store (simple for now)
+# 🔐 In-memory OAuth state store
 OAUTH_STATE_STORE = {}
 
 # Meta endpoints
@@ -21,7 +22,7 @@ META_GRAPH_BASE = "https://graph.facebook.com/v19.0"
 router = APIRouter(prefix="/social/meta", tags=["social-oauth"])
 
 
-# ✅ STEP 1 — CONNECT (UPDATED WITH CATALOG SCOPE)
+# ✅ STEP 1 — CONNECT (FIXED SCOPES)
 @router.get("/connect")
 def meta_connect(tenant_id: str, user_id: str):
     state = f"{tenant_id}:{user_id}"
@@ -31,13 +32,18 @@ def meta_connect(tenant_id: str, user_id: str):
         "user_id": user_id,
     }
 
-    auth_url = (
-        f"https://www.facebook.com/v19.0/dialog/oauth"
-        f"?client_id={settings.META_APP_ID}"
-        f"&redirect_uri={settings.META_REDIRECT_URI}"
-        f"&state={state}"
-        f"&scope=pages_show_list,business_management"
-    )
+    params = {
+        "client_id": settings.META_APP_ID,
+        "redirect_uri": settings.META_REDIRECT_URI,
+        "state": state,
+
+        # 🔥 CRITICAL FIX (POSTING PERMISSIONS)
+        "scope": "pages_manage_posts,pages_read_engagement,pages_show_list",
+
+        "response_type": "code",
+    }
+
+    auth_url = f"https://www.facebook.com/v19.0/dialog/oauth?{urlencode(params)}"
 
     return {"auth_url": auth_url}
 
@@ -54,7 +60,7 @@ async def meta_get(client, url, params, label="META"):
     return data
 
 
-# ✅ STEP 2 — CALLBACK (UNCHANGED BUT CLEAN)
+# ✅ STEP 2 — CALLBACK (FIXED TOKEN STORAGE)
 @router.get("/callback")
 async def meta_callback(
     code: str | None = Query(default=None),
@@ -120,7 +126,7 @@ async def meta_callback(
             if expires_in else None
         )
 
-        # 3. Fetch pages
+        # 3. Fetch pages (THIS RETURNS PAGE TOKENS)
         pages_json = await meta_get(
             client,
             f"{META_GRAPH_BASE}/me/accounts",
@@ -134,17 +140,16 @@ async def meta_callback(
         pages_data = pages_json.get("data", [])
         print("PAGES FOUND =", len(pages_data))
 
-    # ✅ STORE PAGES
+    # ✅ STORE PAGE TOKENS ONLY
     try:
         for page in pages_data:
             account = SocialAccount(
                 tenant_id=state_data["tenant_id"],
                 meta_user_id="unknown",
-                access_token=long_lived_token,
                 token_expires_at=token_expires_at,
                 page_id=page.get("id"),
                 page_name=page.get("name"),
-                page_access_token=page.get("access_token"),
+                page_access_token=page.get("access_token"),  # ✅ CRITICAL
             )
             db.add(account)
 
@@ -162,17 +167,12 @@ async def meta_callback(
     }
 
 
-# ✅ STEP 3 — FETCH & STORE CATALOGS
+# ✅ STEP 3 — FETCH & STORE CATALOGS (FIXED TOKEN SOURCE)
 @router.get("/catalogs")
 async def fetch_meta_catalogs(
     tenant_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Fetch businesses and catalogs for a tenant and store them
-    """
-
-    # 1. Get tenant Meta token
     result = await db.execute(
         select(SocialAccount).where(SocialAccount.tenant_id == tenant_id)
     )
@@ -181,11 +181,11 @@ async def fetch_meta_catalogs(
     if not account:
         raise HTTPException(status_code=404, detail="Meta not connected")
 
-    access_token = account.access_token
+    # 🔥 FIXED — use page token
+    access_token = account.page_access_token
 
     async with httpx.AsyncClient(timeout=30.0) as client:
 
-        # 2. Get businesses
         businesses = await meta_get(
             client,
             f"{META_GRAPH_BASE}/me/businesses",
@@ -194,10 +194,8 @@ async def fetch_meta_catalogs(
         )
 
         business_list = businesses.get("data", [])
-
         all_catalogs = []
 
-        # 3. Loop businesses → catalogs
         for biz in business_list:
             biz_id = biz.get("id")
 
@@ -212,7 +210,6 @@ async def fetch_meta_catalogs(
 
             for cat in catalog_list:
 
-                # 🔥 PREVENT DUPLICATES
                 existing = await db.execute(
                     select(MetaCatalog).where(
                         MetaCatalog.catalog_id == cat.get("id"),
