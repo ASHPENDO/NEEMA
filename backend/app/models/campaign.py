@@ -1,7 +1,7 @@
 # app/models/campaign.py
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import Column, String, DateTime, Text
 from sqlalchemy.dialects.postgresql import UUID, JSON
@@ -25,12 +25,17 @@ class Campaign(Base):
     page_ids = Column(JSON, nullable=False)  # ["page1", "page2"]
 
     caption = Column(Text, nullable=False)
-    image_url = Column(Text, nullable=True)
+    media_url = Column(Text, nullable=True)
 
-    scheduled_at = Column(DateTime, nullable=False)
+    # ✅ TIMEZONE-AWARE
+    scheduled_at = Column(DateTime(timezone=True), nullable=False)
 
-    # EXECUTION TRACKING (CRITICAL)
+    # EXECUTION TRACKING
     status = Column(String, default="scheduled")  
     # scheduled | processing | posted | failed
 
-    created_at = Column(DateTime, default=datetime.utcnow)
+    # ✅ USE UTC-AWARE DEFAULT
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc)
+    )

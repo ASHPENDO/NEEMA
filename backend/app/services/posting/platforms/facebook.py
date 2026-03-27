@@ -1,57 +1,33 @@
 # app/services/posting/platforms/facebook.py
 
 import httpx
-from fastapi import HTTPException
 
 
-class FacebookPoster:
-
+class FacebookAdapter:
     async def post(self, payload, social_account):
-        page_access_token = social_account.page_access_token
-        page_id = payload.page_id
+        """
+        Posts image + caption to a Facebook Page
+        """
 
-        graph_url = f"https://graph.facebook.com/v19.0/{page_id}"
+        page_id = social_account.page_id
+        access_token = social_account.access_token
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            try:
-                if payload.image_url:
-                    response = await client.post(
-                        f"{graph_url}/photos",
-                        data={
-                            "url": payload.image_url,
-                            "caption": payload.caption,
-                            "access_token": page_access_token,
-                        },
-                    )
-                else:
-                    response = await client.post(
-                        f"{graph_url}/feed",
-                        data={
-                            "message": payload.caption,
-                            "access_token": page_access_token,
-                        },
-                    )
+        url = f"https://graph.facebook.com/v19.0/{page_id}/photos"
 
-                data = response.json()
+        data = {
+            "url": payload.image_url,
+            "caption": payload.caption,
+            "access_token": access_token,
+        }
 
-            except httpx.RequestError as e:
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"Facebook request failed: {str(e)}",
-                )
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, data=data)
 
-        if response.status_code != 200 or "error" in data:
-            error = data.get("error", {})
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "platform": "facebook",
-                    "message": error.get("message"),
-                    "code": error.get("code"),
-                },
-            )
+        if response.status_code != 200:
+            raise Exception(f"Facebook API error: {response.text}")
+
+        result = response.json()
 
         return {
-            "platform": "facebook",
-            "post_id": data.get("id"),
+            "post_id": result.get("post_id") or result.get("id")
         }

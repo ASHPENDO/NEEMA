@@ -1,33 +1,51 @@
-from sqlalchemy import select
-from datetime import datetime
+# app/services/scheduler.py
+
+import asyncio
+
+from sqlalchemy import select, func
+
+from app.db.session import async_session_maker
 from app.models.campaign import Campaign
 from app.services.campaign_service import CampaignService
 
 
-async def run_scheduler(db):
+async def campaign_scheduler():
     while True:
-        now = datetime.utcnow()
+        print("[SCHEDULER] Tick...")
 
-        result = await db.execute(
-            select(Campaign).where(
-                Campaign.status == "scheduled",
-                Campaign.scheduled_at <= now
+        async with async_session_maker() as db:
+
+            # ✅ USE DB TIME + LOCK ROWS (CRITICAL)
+            result = await db.execute(
+                select(Campaign)
+                .where(
+                    Campaign.status == "scheduled",
+                    Campaign.scheduled_at <= func.now(),
+                )
+                .with_for_update(skip_locked=True)  # 🔥 execution guard
             )
-        )
 
-        campaigns = result.scalars().all()
+            campaigns = result.scalars().all()
 
-        for campaign in campaigns:
-            service = CampaignService(db)
+            print(f"[SCHEDULER] Found {len(campaigns)} campaigns")
 
-            try:
-                campaign.status = "processing"
-                await db.commit()
+            for campaign in campaigns:
+                service = CampaignService(db)
 
-                await service.execute_campaign(campaign)
+                try:
+                    print(f"[SCHEDULER] Processing campaign {campaign.id}")
 
-            except Exception:
-                campaign.status = "failed"
-                await db.commit()
+                    campaign.status = "processing"
+                    await db.commit()
+
+                    await service.execute_campaign(campaign)
+
+                    print(f"[SCHEDULER] Campaign {campaign.id} completed")
+
+                except Exception as e:
+                    print(f"[SCHEDULER ERROR] Campaign {campaign.id} failed: {e}")
+
+                    campaign.status = "failed"
+                    await db.commit()
 
         await asyncio.sleep(10)

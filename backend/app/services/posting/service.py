@@ -3,7 +3,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from fastapi import HTTPException
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.models.social_account import SocialAccount
 from app.models.post_history import PostHistory
@@ -22,9 +22,18 @@ class PostService:
 
         results = []
 
-        # Normalize to lists
-        platforms = payload.platforms if hasattr(payload, "platforms") else [payload.platform]
-        page_ids = payload.page_ids if hasattr(payload, "page_ids") else [payload.page_id]
+        # Normalize payload (support both single + multi)
+        platforms = (
+            payload.platforms
+            if hasattr(payload, "platforms")
+            else [payload.platform]
+        )
+
+        page_ids = (
+            payload.page_ids
+            if hasattr(payload, "page_ids")
+            else [payload.page_id]
+        )
 
         for platform in platforms:
             poster = PLATFORM_REGISTRY.get(platform)
@@ -36,40 +45,53 @@ class PostService:
                 )
 
             for page_id in page_ids:
-                # Fetch social account
+
+                print(f"[PostService] Looking up account: {platform} / {page_id}")
+
                 result = await db.execute(
                     select(SocialAccount).where(
                         SocialAccount.tenant_id == tenant_id,
-                        SocialAccount.provider == platform,
+                        SocialAccount.platform == platform,
                         SocialAccount.page_id == page_id,
                     )
                 )
-                social_account = result.scalar_one_or_none()
+                social_account = result.scalars().first()
 
                 if not social_account:
-                    continue  # skip invalid connections instead of failing entire campaign
+                    print(f"[PostService] ❌ No social account for {platform} / {page_id}")
+                    continue
 
-                # Create PostHistory
+                print(f"[PostService] ✅ Social account found")
+
+                # ✅ FIX: Convert URL → string
+                image_url_str = (
+                    str(payload.image_url) if getattr(payload, "image_url", None) else None
+                )
+
                 history = PostHistory(
                     tenant_id=tenant_id,
                     platform=platform,
                     page_id=page_id,
                     caption=payload.caption,
-                    image_url=payload.image_url,
+                    image_url=image_url_str,
                     status="pending",
                 )
 
-                db.add(history)
-                await db.commit()
-                await db.refresh(history)
-
                 try:
-                    # Execute post
+                    # 🔥 Wrap everything in one transaction block
+                    db.add(history)
+                    await db.commit()
+                    await db.refresh(history)
+
+                    print(f"[PostService] 🚀 Posting to {platform} / {page_id}")
+
                     result = await poster.post(payload, social_account)
+
+                    print(f"[PostService] ✅ Post success: {result}")
 
                     history.status = "success"
                     history.external_post_id = result.get("post_id")
-                    history.posted_at = datetime.utcnow()
+                    history.posted_at = datetime.now(timezone.utc)
 
                     await db.commit()
 
@@ -81,9 +103,16 @@ class PostService:
                     })
 
                 except Exception as e:
+                    print(f"[PostService ERROR] {platform} / {page_id}: {e}")
+
+                    # 🔥 CRITICAL: reset broken transaction
+                    await db.rollback()
+
+                    # Re-attach history safely
                     history.status = "failed"
                     history.error_message = str(e)
 
+                    db.add(history)
                     await db.commit()
 
                     results.append({

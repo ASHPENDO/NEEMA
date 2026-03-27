@@ -1,6 +1,8 @@
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.models.campaign import Campaign
 from app.services.posting.service import PostService
+from app.services.posting.schemas import PostPayload
 
 
 class CampaignService:
@@ -16,7 +18,7 @@ class CampaignService:
             platforms=data.platforms,
             page_ids=data.page_ids,
             scheduled_at=data.scheduled_at,
-            status="scheduled"
+            status="scheduled",
         )
 
         self.db.add(campaign)
@@ -26,19 +28,25 @@ class CampaignService:
         return campaign
 
     async def execute_campaign(self, campaign: Campaign):
-        post_service = PostService(self.db)
+        """
+        Executes campaign across all platforms/pages
+        """
 
-        result = await post_service.publish(
-            tenant_id=campaign.tenant_id,
-            platforms=campaign.platforms,
-            content={
-                "caption": campaign.caption,
-                "media_url": campaign.media_url,
-                "page_ids": campaign.page_ids
-            }
-        )
+        for platform, page_id in zip(campaign.platforms, campaign.page_ids):
+            payload = PostPayload(
+                platform=platform,
+                page_id=page_id,
+                caption=campaign.caption,
+                image_url=campaign.media_url,  # map media_url → image_url
+            )
+
+            await PostService.publish(
+                payload=payload,
+                tenant_id=campaign.tenant_id,
+                db=self.db,
+            )
 
         campaign.status = "posted"
         await self.db.commit()
 
-        return result
+        return {"success": True}
