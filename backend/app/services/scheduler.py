@@ -6,6 +6,7 @@ from sqlalchemy import select, func
 
 from app.db.session import async_session_maker
 from app.models.campaign import Campaign
+from app.models.social_account import SocialAccount
 from app.services.campaign_service import CampaignService
 
 
@@ -15,14 +16,13 @@ async def campaign_scheduler():
 
         async with async_session_maker() as db:
 
-            # ✅ USE DB TIME + LOCK ROWS (CRITICAL)
             result = await db.execute(
                 select(Campaign)
                 .where(
                     Campaign.status == "scheduled",
                     Campaign.scheduled_at <= func.now(),
                 )
-                .with_for_update(skip_locked=True)  # 🔥 execution guard
+                .with_for_update(skip_locked=True)
             )
 
             campaigns = result.scalars().all()
@@ -34,6 +34,22 @@ async def campaign_scheduler():
 
                 try:
                     print(f"[SCHEDULER] Processing campaign {campaign.id}")
+
+                    # 🔥 FETCH SOCIAL ACCOUNT
+                    social_account = await db.get(
+                        SocialAccount, campaign.social_account_id
+                    )
+
+                    # 🔥 GUARD (CRITICAL)
+                    if (
+                        not social_account
+                        or social_account.requires_reauth
+                        or social_account.status != "active"
+                    ):
+                        print(
+                            f"[SCHEDULER] Skipping campaign {campaign.id} - account requires reconnect"
+                        )
+                        continue
 
                     campaign.status = "processing"
                     await db.commit()

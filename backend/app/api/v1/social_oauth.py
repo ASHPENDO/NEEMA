@@ -1,3 +1,5 @@
+# app/api/v1/social_oauth.py
+
 from fastapi import APIRouter, Query, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -22,9 +24,13 @@ META_GRAPH_BASE = "https://graph.facebook.com/v19.0"
 router = APIRouter(prefix="/social/meta", tags=["social-oauth"])
 
 
-# ✅ STEP 1 — CONNECT (FIXED SCOPES)
+# ✅ STEP 1 — CONNECT (WITH FORCE REAUTH)
 @router.get("/connect")
-def meta_connect(tenant_id: str, user_id: str):
+def meta_connect(
+    tenant_id: str,
+    user_id: str,
+    force_reauth: bool = False,
+):
     state = f"{tenant_id}:{user_id}"
 
     OAUTH_STATE_STORE[state] = {
@@ -36,12 +42,13 @@ def meta_connect(tenant_id: str, user_id: str):
         "client_id": settings.META_APP_ID,
         "redirect_uri": settings.META_REDIRECT_URI,
         "state": state,
-
-        # 🔥 CRITICAL FIX (POSTING PERMISSIONS)
         "scope": "pages_manage_posts,pages_read_engagement,pages_show_list",
-
         "response_type": "code",
     }
+
+    # 🔥 FORCE FACEBOOK TO RE-ASK PERMISSIONS
+    if force_reauth:
+        params["auth_type"] = "rerequest"
 
     auth_url = f"https://www.facebook.com/v19.0/dialog/oauth?{urlencode(params)}"
 
@@ -60,7 +67,7 @@ async def meta_get(client, url, params, label="META"):
     return data
 
 
-# ✅ STEP 2 — CALLBACK (FIXED TOKEN STORAGE)
+# ✅ STEP 2 — CALLBACK (UPSERT + HEALTH RESET)
 @router.get("/callback")
 async def meta_callback(
     code: str | None = Query(default=None),
@@ -126,7 +133,7 @@ async def meta_callback(
             if expires_in else None
         )
 
-        # 3. Fetch pages (THIS RETURNS PAGE TOKENS)
+        # 3. Fetch pages (PAGE TOKENS)
         pages_json = await meta_get(
             client,
             f"{META_GRAPH_BASE}/me/accounts",
@@ -140,18 +147,48 @@ async def meta_callback(
         pages_data = pages_json.get("data", [])
         print("PAGES FOUND =", len(pages_data))
 
-    # ✅ STORE PAGE TOKENS ONLY
+    # 🔥 UPSERT LOGIC (CRITICAL)
     try:
         for page in pages_data:
-            account = SocialAccount(
-                tenant_id=state_data["tenant_id"],
-                meta_user_id="unknown",
-                token_expires_at=token_expires_at,
-                page_id=page.get("id"),
-                page_name=page.get("name"),
-                page_access_token=page.get("access_token"),  # ✅ CRITICAL
+
+            existing_query = await db.execute(
+                select(SocialAccount).where(
+                    SocialAccount.tenant_id == state_data["tenant_id"],
+                    SocialAccount.page_id == page.get("id"),
+                    SocialAccount.platform == "facebook",
+                )
             )
-            db.add(account)
+
+            existing_account = existing_query.scalars().first()
+
+            if existing_account:
+                # 🔥 UPDATE EXISTING (RECONNECT)
+                existing_account.page_access_token = page.get("access_token")
+                existing_account.page_name = page.get("name")
+                existing_account.token_expires_at = token_expires_at
+
+                # 🔥 RESET HEALTH STATE
+                existing_account.status = "active"
+                existing_account.requires_reauth = False
+                existing_account.last_error = None
+                existing_account.last_checked_at = datetime.now(timezone.utc)
+
+            else:
+                # 🔥 CREATE NEW
+                account = SocialAccount(
+                    tenant_id=state_data["tenant_id"],
+                    meta_user_id="unknown",
+                    token_expires_at=token_expires_at,
+                    page_id=page.get("id"),
+                    page_name=page.get("name"),
+                    page_access_token=page.get("access_token"),
+
+                    # 🔥 HEALTH DEFAULTS
+                    status="active",
+                    requires_reauth=False,
+                    last_checked_at=datetime.now(timezone.utc),
+                )
+                db.add(account)
 
         await db.commit()
 
@@ -167,7 +204,7 @@ async def meta_callback(
     }
 
 
-# ✅ STEP 3 — FETCH & STORE CATALOGS (FIXED TOKEN SOURCE)
+# ✅ STEP 3 — FETCH & STORE CATALOGS (UNCHANGED)
 @router.get("/catalogs")
 async def fetch_meta_catalogs(
     tenant_id: str,
@@ -181,7 +218,6 @@ async def fetch_meta_catalogs(
     if not account:
         raise HTTPException(status_code=404, detail="Meta not connected")
 
-    # 🔥 FIXED — use page token
     access_token = account.page_access_token
 
     async with httpx.AsyncClient(timeout=30.0) as client:

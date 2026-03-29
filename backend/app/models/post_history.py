@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, String, Text, DateTime
+from sqlalchemy import Column, String, Text, DateTime, Integer
 from sqlalchemy.dialects.postgresql import UUID
 
 from app.db.base import Base
@@ -24,11 +24,16 @@ class PostHistory(Base):
 
     status = Column(String, default="pending")
 
-    external_post_id = Column(String, nullable=True)  # Facebook post ID
+    external_post_id = Column(String, nullable=True)
 
     error_message = Column(Text, nullable=True)
 
-    # ✅ UTC-aware timestamps
+    # 🔥 NEW FIELDS
+    failure_reason = Column(Text, nullable=True)
+    retry_count = Column(Integer, default=0, nullable=False)
+    last_attempt_at = Column(DateTime(timezone=True), nullable=True)
+
+    # UTC-aware timestamps
     created_at = Column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc)

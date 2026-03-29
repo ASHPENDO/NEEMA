@@ -3,6 +3,33 @@
 import httpx
 
 
+# 🔥 ERROR TYPES
+class FacebookErrorType:
+    ACCOUNT_RESTRICTED = "ACCOUNT_RESTRICTED"  # 368
+    TOKEN_INVALID = "TOKEN_INVALID"            # 190
+    UNKNOWN = "UNKNOWN"
+
+
+# 🔥 CUSTOM EXCEPTION (CRITICAL)
+class FacebookAPIException(Exception):
+    def __init__(self, message, code=None, error_type=None, raw=None):
+        super().__init__(message)
+        self.code = code
+        self.error_type = error_type
+        self.raw = raw
+
+
+def classify_facebook_error(error: dict) -> str:
+    code = error.get("code")
+
+    if code == 368:
+        return FacebookErrorType.ACCOUNT_RESTRICTED
+    elif code == 190:
+        return FacebookErrorType.TOKEN_INVALID
+
+    return FacebookErrorType.UNKNOWN
+
+
 class FacebookAdapter:
     async def post(self, payload, social_account):
         """
@@ -12,12 +39,13 @@ class FacebookAdapter:
         """
 
         page_id = str(social_account.page_id).strip()
-
-        # 🔥 MUST be PAGE ACCESS TOKEN
         access_token = social_account.page_access_token
 
         if not page_id or not access_token:
-            raise Exception("Missing page_id or page_access_token")
+            raise FacebookAPIException(
+                "Missing page_id or page_access_token",
+                error_type=FacebookErrorType.UNKNOWN,
+            )
 
         caption = payload.caption or ""
 
@@ -29,20 +57,15 @@ class FacebookAdapter:
 
         async with httpx.AsyncClient(timeout=30.0) as client:
 
-            # ✅ IMAGE POST
             if image_url:
                 url = f"https://graph.facebook.com/v19.0/{page_id}/photos"
-
                 data = {
                     "url": image_url,
                     "caption": caption,
                     "access_token": access_token,
                 }
-
-            # ✅ TEXT-ONLY POST
             else:
                 url = f"https://graph.facebook.com/v19.0/{page_id}/feed"
-
                 data = {
                     "message": caption,
                     "access_token": access_token,
@@ -50,31 +73,46 @@ class FacebookAdapter:
 
             response = await client.post(url, data=data)
 
-        # 🔥 HANDLE FACEBOOK ERRORS PROPERLY
+        # 🔥 STRUCTURED ERROR HANDLING
         if response.status_code != 200:
             try:
                 error_data = response.json()
                 error = error_data.get("error", {})
+
                 error_message = error.get("message")
                 error_code = error.get("code")
 
-                raise Exception(
-                    f"Facebook API error (code {error_code}): {error_message}"
+                error_type = classify_facebook_error(error)
+
+                raise FacebookAPIException(
+                    message=f"Facebook API error: {error_message}",
+                    code=error_code,
+                    error_type=error_type,
+                    raw=error_data,
                 )
 
-            except Exception:
-                raise Exception(f"Facebook API error: {response.text}")
+            except ValueError:
+                raise FacebookAPIException(
+                    message=f"Facebook API error: {response.text}",
+                    error_type=FacebookErrorType.UNKNOWN,
+                )
 
         # ✅ SAFE RESPONSE PARSING
         try:
             result = response.json()
         except Exception:
-            raise Exception("Invalid JSON response from Facebook")
+            raise FacebookAPIException(
+                "Invalid JSON response from Facebook",
+                error_type=FacebookErrorType.UNKNOWN,
+            )
 
         post_id = result.get("post_id") or result.get("id")
 
         if not post_id:
-            raise Exception(f"Unexpected Facebook response: {result}")
+            raise FacebookAPIException(
+                f"Unexpected Facebook response: {result}",
+                error_type=FacebookErrorType.UNKNOWN,
+            )
 
         return {
             "post_id": post_id
