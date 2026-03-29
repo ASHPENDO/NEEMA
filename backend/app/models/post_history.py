@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, String, Text, DateTime, Integer
+from sqlalchemy import Column, String, Text, DateTime, Integer, Index
 from sqlalchemy.dialects.postgresql import UUID
 
 from app.db.base import Base
@@ -28,10 +28,13 @@ class PostHistory(Base):
 
     error_message = Column(Text, nullable=True)
 
-    # 🔥 NEW FIELDS
+    # 🔥 FAILURE + RETRY TRACKING
     failure_reason = Column(Text, nullable=True)
     retry_count = Column(Integer, default=0, nullable=False)
     last_attempt_at = Column(DateTime(timezone=True), nullable=True)
+
+    # 🔥 IDEMPOTENCY (CRITICAL)
+    idempotency_key = Column(String, nullable=True, index=True)
 
     # UTC-aware timestamps
     created_at = Column(
@@ -43,3 +46,13 @@ class PostHistory(Base):
         DateTime(timezone=True),
         nullable=True
     )
+
+
+# 🔥 COMPOSITE INDEX (FAST LOOKUP FOR IDEMPOTENCY)
+Index(
+    "ix_post_history_idem_lookup",
+    PostHistory.tenant_id,
+    PostHistory.platform,
+    PostHistory.page_id,
+    PostHistory.idempotency_key,
+)

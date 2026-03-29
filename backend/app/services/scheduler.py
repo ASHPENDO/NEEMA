@@ -1,13 +1,13 @@
 # app/services/scheduler.py
 
 import asyncio
-
 from sqlalchemy import select, func
 
 from app.db.session import async_session_maker
 from app.models.campaign import Campaign
-from app.models.social_account import SocialAccount
-from app.services.campaign_service import CampaignService
+
+# 🔥 NEW
+from app.tasks.campaign_tasks import execute_campaign_task
 
 
 async def campaign_scheduler():
@@ -19,7 +19,7 @@ async def campaign_scheduler():
             result = await db.execute(
                 select(Campaign)
                 .where(
-                    Campaign.status == "scheduled",
+                    Campaign.status.in_(["scheduled", "failed"]),
                     Campaign.scheduled_at <= func.now(),
                 )
                 .with_for_update(skip_locked=True)
@@ -30,38 +30,16 @@ async def campaign_scheduler():
             print(f"[SCHEDULER] Found {len(campaigns)} campaigns")
 
             for campaign in campaigns:
-                service = CampaignService(db)
-
                 try:
-                    print(f"[SCHEDULER] Processing campaign {campaign.id}")
+                    print(f"[QUEUE] Dispatching campaign {campaign.id}")
 
-                    # 🔥 FETCH SOCIAL ACCOUNT
-                    social_account = await db.get(
-                        SocialAccount, campaign.social_account_id
-                    )
-
-                    # 🔥 GUARD (CRITICAL)
-                    if (
-                        not social_account
-                        or social_account.requires_reauth
-                        or social_account.status != "active"
-                    ):
-                        print(
-                            f"[SCHEDULER] Skipping campaign {campaign.id} - account requires reconnect"
-                        )
-                        continue
-
-                    campaign.status = "processing"
+                    campaign.status = "queued"
                     await db.commit()
 
-                    await service.execute_campaign(campaign)
-
-                    print(f"[SCHEDULER] Campaign {campaign.id} completed")
+                    # 🔥 SEND TO CELERY WORKER
+                    execute_campaign_task.delay(str(campaign.id))
 
                 except Exception as e:
-                    print(f"[SCHEDULER ERROR] Campaign {campaign.id} failed: {e}")
-
-                    campaign.status = "failed"
-                    await db.commit()
+                    print(f"[SCHEDULER ERROR] {campaign.id}: {e}")
 
         await asyncio.sleep(10)
