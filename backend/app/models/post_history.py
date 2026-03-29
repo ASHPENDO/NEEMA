@@ -1,17 +1,12 @@
 # app/models/post_history.py
 
 import uuid
-from sqlalchemy import Column, String, Text, DateTime, Enum, ForeignKey
+from datetime import datetime, timezone
+
+from sqlalchemy import Column, String, Text, DateTime
 from sqlalchemy.dialects.postgresql import UUID
-from datetime import datetime
 
 from app.db.base import Base
-
-
-class PostStatusEnum(str, Enum):
-    pending = "pending"
-    success = "success"
-    failed = "failed"
 
 
 class PostHistory(Base):
@@ -33,5 +28,13 @@ class PostHistory(Base):
 
     error_message = Column(Text, nullable=True)
 
-    created_at = Column(DateTime, default=datetime.utcnow)
-    posted_at = Column(DateTime, nullable=True)
+    # ✅ UTC-aware timestamps
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc)
+    )
+
+    posted_at = Column(
+        DateTime(timezone=True),
+        nullable=True
+    )
