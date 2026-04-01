@@ -1,7 +1,7 @@
 # app/services/posting/service.py
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func, text
 from fastapi import HTTPException
 from datetime import datetime, timezone
 
@@ -22,7 +22,27 @@ class PostService:
 
         results = []
 
+        # -----------------------------
+        # 🔍 DEBUG: DATABASE INSPECTION
+        # -----------------------------
+        try:
+            # Count rows
+            count_result = await db.execute(text("SELECT COUNT(*) FROM social_accounts"))
+            count = count_result.scalar()
+
+            # Fetch all accounts
+            all_result = await db.execute(select(SocialAccount))
+            all_accounts = all_result.scalars().all()
+
+            print(f"[DEBUG] DB COUNT social_accounts: {count}")
+            print(f"[DEBUG] ALL ACCOUNTS: {all_accounts}")
+
+        except Exception as e:
+            print(f"[DEBUG ERROR] DB inspection failed: {e}")
+
+        # -----------------------------
         # Normalize payload
+        # -----------------------------
         platforms = getattr(payload, "platforms", None) or [payload.platform]
         page_ids = getattr(payload, "page_ids", None) or [payload.page_id]
 
@@ -46,15 +66,31 @@ class PostService:
                 page_id_str = str(page_id).strip()
 
                 print(f"[PostService] 🔍 Lookup: {platform} / {page_id_str}")
+                print(f"[DEBUG] tenant_id={tenant_id}")
 
+                # -----------------------------
+                # 🔍 DEBUG: RAW QUERY CHECK
+                # -----------------------------
+                raw_check = await db.execute(
+                    select(SocialAccount).where(
+                        func.trim(SocialAccount.page_id) == page_id_str
+                    )
+                )
+                raw_accounts = raw_check.scalars().all()
+                print(f"[DEBUG] RAW MATCH (page_id only): {raw_accounts}")
+
+                # -----------------------------
+                # ✅ MAIN QUERY
+                # -----------------------------
                 result = await db.execute(
                     select(SocialAccount).where(
                         SocialAccount.tenant_id == tenant_id,
-                        SocialAccount.platform == platform,
-                        SocialAccount.page_id == page_id_str,
+                        func.lower(SocialAccount.platform) == platform.lower(),
+                        func.trim(SocialAccount.page_id) == page_id_str,
                     )
                 )
-                social_account = result.scalars().first()
+
+                social_account = result.scalar_one_or_none()
 
                 if not social_account:
                     print(f"[PostService] ❌ No account for {platform} / {page_id_str}")
@@ -68,7 +104,9 @@ class PostService:
 
                 print(f"[PostService] ✅ Account found")
 
-                # Create history (pending)
+                # -----------------------------
+                # Create history
+                # -----------------------------
                 history = PostHistory(
                     tenant_id=tenant_id,
                     platform=platform,
@@ -85,7 +123,6 @@ class PostService:
                 try:
                     print(f"[PostService] 🚀 Posting → {platform} / {page_id_str}")
 
-                    # 🔥 CORE CALL (delegates to platform implementation)
                     result = await poster.post(payload, social_account)
 
                     print(f"[PostService] ✅ Success: {result}")
@@ -109,7 +146,6 @@ class PostService:
 
                     await db.rollback()
 
-                    # Re-attach history safely
                     history.status = "failed"
                     history.error_message = str(e)
 
