@@ -38,7 +38,7 @@ class FacebookAdapter:
         - Caption only → /feed
         """
 
-        page_id = str(social_account.page_id).strip()
+        page_id = str(social_account.page_id).strip() if social_account.page_id else None
         access_token = social_account.page_access_token
 
         if not page_id or not access_token:
@@ -47,8 +47,14 @@ class FacebookAdapter:
                 error_type=FacebookErrorType.UNKNOWN,
             )
 
-        caption = payload.caption or ""
+        # ✅ Normalize caption safely
+        caption = (
+            getattr(payload, "caption", None)
+            or getattr(payload, "message", "")
+            or ""
+        )
 
+        # ✅ Normalize image_url
         image_url = (
             str(payload.image_url).strip()
             if getattr(payload, "image_url", None)
@@ -71,7 +77,13 @@ class FacebookAdapter:
                     "access_token": access_token,
                 }
 
-            response = await client.post(url, data=data)
+            try:
+                response = await client.post(url, data=data)
+            except httpx.RequestError as e:
+                raise FacebookAPIException(
+                    f"Network error while calling Facebook: {str(e)}",
+                    error_type=FacebookErrorType.UNKNOWN,
+                )
 
         # 🔥 STRUCTURED ERROR HANDLING
         if response.status_code != 200:
@@ -79,7 +91,7 @@ class FacebookAdapter:
                 error_data = response.json()
                 error = error_data.get("error", {})
 
-                error_message = error.get("message")
+                error_message = error.get("message", "Unknown error")
                 error_code = error.get("code")
 
                 error_type = classify_facebook_error(error)
@@ -93,7 +105,7 @@ class FacebookAdapter:
 
             except ValueError:
                 raise FacebookAPIException(
-                    message=f"Facebook API error: {response.text}",
+                    message=f"Facebook API error (non-JSON): {response.text}",
                     error_type=FacebookErrorType.UNKNOWN,
                 )
 

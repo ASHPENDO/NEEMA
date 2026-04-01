@@ -14,29 +14,34 @@ from datetime import datetime, timezone, timedelta
 
 from app.core.config import settings
 
-# 🔐 In-memory OAuth state store
-OAUTH_STATE_STORE = {}
+import json
+import uuid
+from app.core.redis import redis_client
 
-# Meta endpoints
 META_TOKEN_URL = "https://graph.facebook.com/v19.0/oauth/access_token"
 META_GRAPH_BASE = "https://graph.facebook.com/v19.0"
 
 router = APIRouter(prefix="/social/meta", tags=["social-oauth"])
 
 
-# ✅ STEP 1 — CONNECT (WITH FORCE REAUTH)
 @router.get("/connect")
-def meta_connect(
+async def meta_connect(
     tenant_id: str,
     user_id: str,
     force_reauth: bool = False,
 ):
-    state = f"{tenant_id}:{user_id}"
+    state = str(uuid.uuid4())
 
-    OAUTH_STATE_STORE[state] = {
+    state_payload = {
         "tenant_id": tenant_id,
         "user_id": user_id,
     }
+
+    await redis_client.set(
+        f"oauth_state:{state}",
+        json.dumps(state_payload),
+        ex=300
+    )
 
     params = {
         "client_id": settings.META_APP_ID,
@@ -46,7 +51,6 @@ def meta_connect(
         "response_type": "code",
     }
 
-    # 🔥 FORCE FACEBOOK TO RE-ASK PERMISSIONS
     if force_reauth:
         params["auth_type"] = "rerequest"
 
@@ -55,7 +59,6 @@ def meta_connect(
     return {"auth_url": auth_url}
 
 
-# ✅ HELPER
 async def meta_get(client, url, params, label="META"):
     response = await client.get(url, params=params)
     data = response.json()
@@ -67,7 +70,6 @@ async def meta_get(client, url, params, label="META"):
     return data
 
 
-# ✅ STEP 2 — CALLBACK (UPSERT + HEALTH RESET)
 @router.get("/callback")
 async def meta_callback(
     code: str | None = Query(default=None),
@@ -87,13 +89,17 @@ async def meta_callback(
     if not code or not state:
         raise HTTPException(status_code=400, detail="Missing code or state")
 
-    state_data = OAUTH_STATE_STORE.pop(state, None)
-    if not state_data:
+    raw_state = await redis_client.get(f"oauth_state:{state}")
+
+    if not raw_state:
         raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
+
+    state_data = json.loads(raw_state)
+
+    await redis_client.delete(f"oauth_state:{state}")
 
     async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
 
-        # 1. Short-lived token
         short_token_data = await meta_get(
             client,
             META_TOKEN_URL,
@@ -110,7 +116,6 @@ async def meta_callback(
         if not short_lived_token:
             raise HTTPException(status_code=400, detail="No short-lived token")
 
-        # 2. Long-lived token
         long_token_data = await meta_get(
             client,
             META_TOKEN_URL,
@@ -128,12 +133,12 @@ async def meta_callback(
             raise HTTPException(status_code=400, detail="No long-lived token")
 
         expires_in = long_token_data.get("expires_in")
+
         token_expires_at = (
-            datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+            (datetime.now(timezone.utc) + timedelta(seconds=expires_in)).replace(tzinfo=None)
             if expires_in else None
         )
 
-        # 3. Fetch pages (PAGE TOKENS)
         pages_json = await meta_get(
             client,
             f"{META_GRAPH_BASE}/me/accounts",
@@ -147,7 +152,6 @@ async def meta_callback(
         pages_data = pages_json.get("data", [])
         print("PAGES FOUND =", len(pages_data))
 
-    # 🔥 UPSERT LOGIC (CRITICAL)
     try:
         for page in pages_data:
 
@@ -162,19 +166,16 @@ async def meta_callback(
             existing_account = existing_query.scalars().first()
 
             if existing_account:
-                # 🔥 UPDATE EXISTING (RECONNECT)
                 existing_account.page_access_token = page.get("access_token")
                 existing_account.page_name = page.get("name")
                 existing_account.token_expires_at = token_expires_at
 
-                # 🔥 RESET HEALTH STATE
                 existing_account.status = "active"
                 existing_account.requires_reauth = False
                 existing_account.last_error = None
-                existing_account.last_checked_at = datetime.now(timezone.utc)
+                existing_account.last_checked_at = datetime.utcnow()
 
             else:
-                # 🔥 CREATE NEW
                 account = SocialAccount(
                     tenant_id=state_data["tenant_id"],
                     meta_user_id="unknown",
@@ -182,11 +183,9 @@ async def meta_callback(
                     page_id=page.get("id"),
                     page_name=page.get("name"),
                     page_access_token=page.get("access_token"),
-
-                    # 🔥 HEALTH DEFAULTS
                     status="active",
                     requires_reauth=False,
-                    last_checked_at=datetime.now(timezone.utc),
+                    last_checked_at=datetime.utcnow(),
                 )
                 db.add(account)
 
@@ -201,80 +200,4 @@ async def meta_callback(
         "status": "connected",
         "tenant_id": state_data["tenant_id"],
         "pages_saved": len(pages_data),
-    }
-
-
-# ✅ STEP 3 — FETCH & STORE CATALOGS (UNCHANGED)
-@router.get("/catalogs")
-async def fetch_meta_catalogs(
-    tenant_id: str,
-    db: AsyncSession = Depends(get_db),
-):
-    result = await db.execute(
-        select(SocialAccount).where(SocialAccount.tenant_id == tenant_id)
-    )
-    account = result.scalars().first()
-
-    if not account:
-        raise HTTPException(status_code=404, detail="Meta not connected")
-
-    access_token = account.page_access_token
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-
-        businesses = await meta_get(
-            client,
-            f"{META_GRAPH_BASE}/me/businesses",
-            {"access_token": access_token},
-            label="BUSINESSES",
-        )
-
-        business_list = businesses.get("data", [])
-        all_catalogs = []
-
-        for biz in business_list:
-            biz_id = biz.get("id")
-
-            catalogs = await meta_get(
-                client,
-                f"{META_GRAPH_BASE}/{biz_id}/owned_product_catalogs",
-                {"access_token": access_token},
-                label="CATALOGS",
-            )
-
-            catalog_list = catalogs.get("data", [])
-
-            for cat in catalog_list:
-
-                existing = await db.execute(
-                    select(MetaCatalog).where(
-                        MetaCatalog.catalog_id == cat.get("id"),
-                        MetaCatalog.tenant_id == tenant_id,
-                    )
-                )
-
-                if existing.scalars().first():
-                    continue
-
-                catalog_obj = MetaCatalog(
-                    tenant_id=tenant_id,
-                    business_id=biz_id,
-                    catalog_id=cat.get("id"),
-                    catalog_name=cat.get("name"),
-                )
-
-                db.add(catalog_obj)
-
-                all_catalogs.append({
-                    "business_id": biz_id,
-                    "catalog_id": cat.get("id"),
-                    "catalog_name": cat.get("name"),
-                })
-
-        await db.commit()
-
-    return {
-        "status": "success",
-        "total_catalogs": len(all_catalogs),
-        "catalogs": all_catalogs,
     }

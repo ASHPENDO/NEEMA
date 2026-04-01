@@ -7,12 +7,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 def _strip_asyncpg_unsupported_params(url: str) -> str:
-    """
-    asyncpg does NOT accept sslmode or channel_binding as connect kwargs.
-    If these appear in the URL query, SQLAlchemy can end up passing them to
-    asyncpg.connect(), causing:
-      TypeError: connect() got an unexpected keyword argument 'sslmode'
-    """
     parts = urlsplit(url)
     if not parts.query:
         return url
@@ -33,7 +27,6 @@ class Settings(BaseSettings):
     # -----------------------------
     # Environment
     # -----------------------------
-    # Use: development | staging | production
     ENVIRONMENT: str = "development"
 
     # -----------------------------
@@ -50,6 +43,12 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
 
     # -----------------------------
+    # 🔴 REDIS (NEW — ADDED)
+    # -----------------------------
+    REDIS_HOST: str = "localhost"
+    REDIS_PORT: int = 6379
+
+    # -----------------------------
     # Media / Storage
     # -----------------------------
     STORAGE_PROVIDER: str = "local"
@@ -57,7 +56,6 @@ class Settings(BaseSettings):
     MEDIA_URL: str = "/media"
     MEDIA_PUBLIC_BASE_URL: str = "http://127.0.0.1:8000"
 
-    # image optimization defaults
     IMAGE_MAX_WIDTH: int = 1080
     IMAGE_JPEG_QUALITY: int = 85
     IMAGE_CREATE_WEBP: bool = True
@@ -81,7 +79,6 @@ class Settings(BaseSettings):
         "whatsapp_business_messaging"
     )
 
-    # Optional frontend callback target for later UX handoff
     FRONTEND_SOCIAL_CALLBACK_URL: str | None = None
 
     # -----------------------------
@@ -114,7 +111,6 @@ class Settings(BaseSettings):
 
     # -----------------------------
     # Safaricom Cloud
-    # Treated as S3-compatible until a concrete storage API contract is chosen.
     # -----------------------------
     SAFARICOM_BUCKET: str | None = None
     SAFARICOM_REGION: str | None = None

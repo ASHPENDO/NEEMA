@@ -16,7 +16,5 @@ celery_app.conf.update(
     enable_utc=True,
 )
 
-# 🔥 CRITICAL: REGISTER TASK MODULES
-celery_app.autodiscover_tasks([
-    "app.tasks"
-])
+# 🔥 FORCE IMPORT TASKS (CRITICAL FIX)
+import app.tasks.campaign_tasks  # noqa

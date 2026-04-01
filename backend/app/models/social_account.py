@@ -1,5 +1,3 @@
-# app/models/social_account.py
-
 from sqlalchemy import Column, String, DateTime, ForeignKey, Text, Boolean, Enum
 from sqlalchemy.dialects.postgresql import UUID
 from datetime import datetime
@@ -23,10 +21,8 @@ class SocialAccount(Base):
 
     platform = Column(String, default="facebook", nullable=False)
 
-    # Facebook user (optional)
     meta_user_id = Column(String, nullable=True)
 
-    # PAGE TOKEN (source of truth)
     page_access_token = Column(Text, nullable=False)
 
     token_expires_at = Column(DateTime, nullable=True)
@@ -34,9 +30,13 @@ class SocialAccount(Base):
     page_id = Column(String, nullable=False)
     page_name = Column(String, nullable=True)
 
-    # 🔥 NEW HEALTH FIELDS
+    # ✅ CRITICAL FIX HERE
     status = Column(
-        Enum(SocialAccountStatus),
+        Enum(
+            SocialAccountStatus,
+            values_callable=lambda obj: [e.value for e in obj],  # 👈 forces "active"
+            name="socialaccountstatus",
+        ),
         default=SocialAccountStatus.ACTIVE,
         nullable=False
     )

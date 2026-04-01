@@ -22,17 +22,15 @@ class PostService:
 
         results = []
 
-        platforms = (
-            payload.platforms
-            if hasattr(payload, "platforms")
-            else [payload.platform]
-        )
+        # Normalize payload
+        platforms = getattr(payload, "platforms", None) or [payload.platform]
+        page_ids = getattr(payload, "page_ids", None) or [payload.page_id]
 
-        page_ids = (
-            payload.page_ids
-            if hasattr(payload, "page_ids")
-            else [payload.page_id]
-        )
+        caption = getattr(payload, "caption", None) or getattr(payload, "message", "")
+        image_url = str(payload.image_url) if getattr(payload, "image_url", None) else None
+
+        if not caption:
+            raise HTTPException(status_code=400, detail="Caption/message is required")
 
         for platform in platforms:
             poster = PLATFORM_REGISTRY.get(platform)
@@ -45,16 +43,9 @@ class PostService:
 
             for page_id in page_ids:
 
-                # 🔥 DEBUG (CRITICAL)
-                print(
-                    f"[DEBUG] tenant_id={tenant_id}, "
-                    f"platform={platform}, "
-                    f"page_id={page_id}"
-                )
-
                 page_id_str = str(page_id).strip()
 
-                print(f"[PostService] Looking up account: {platform} / {page_id_str}")
+                print(f"[PostService] 🔍 Lookup: {platform} / {page_id_str}")
 
                 result = await db.execute(
                     select(SocialAccount).where(
@@ -65,39 +56,39 @@ class PostService:
                 )
                 social_account = result.scalars().first()
 
-                print(f"[DEBUG] Query result: {social_account}")
-
                 if not social_account:
-                    print(f"[PostService] ❌ No social account for {platform} / {page_id_str}")
+                    print(f"[PostService] ❌ No account for {platform} / {page_id_str}")
+                    results.append({
+                        "platform": platform,
+                        "page_id": page_id_str,
+                        "status": "failed",
+                        "error": "Social account not found",
+                    })
                     continue
 
-                print(f"[PostService] ✅ Social account found")
+                print(f"[PostService] ✅ Account found")
 
-                image_url_str = (
-                    str(payload.image_url)
-                    if getattr(payload, "image_url", None)
-                    else None
-                )
-
+                # Create history (pending)
                 history = PostHistory(
                     tenant_id=tenant_id,
                     platform=platform,
                     page_id=page_id_str,
-                    caption=payload.caption,
-                    image_url=image_url_str,
+                    caption=caption,
+                    image_url=image_url,
                     status="pending",
                 )
 
+                db.add(history)
+                await db.commit()
+                await db.refresh(history)
+
                 try:
-                    db.add(history)
-                    await db.commit()
-                    await db.refresh(history)
+                    print(f"[PostService] 🚀 Posting → {platform} / {page_id_str}")
 
-                    print(f"[PostService] 🚀 Posting to {platform} / {page_id_str}")
-
+                    # 🔥 CORE CALL (delegates to platform implementation)
                     result = await poster.post(payload, social_account)
 
-                    print(f"[PostService] ✅ Post success: {result}")
+                    print(f"[PostService] ✅ Success: {result}")
 
                     history.status = "success"
                     history.external_post_id = result.get("post_id")
@@ -110,6 +101,7 @@ class PostService:
                         "page_id": page_id_str,
                         "status": "success",
                         "history_id": str(history.id),
+                        "post_id": result.get("post_id"),
                     })
 
                 except Exception as e:
@@ -117,6 +109,7 @@ class PostService:
 
                     await db.rollback()
 
+                    # Re-attach history safely
                     history.status = "failed"
                     history.error_message = str(e)
 

@@ -2,6 +2,9 @@
 
 from app.services.posting.platforms.facebook import FacebookAdapter
 
+
+facebook_adapter = FacebookAdapter()
+
 PLATFORM_REGISTRY = {
-    "facebook": FacebookAdapter(),
+    "facebook": facebook_adapter,
 }
