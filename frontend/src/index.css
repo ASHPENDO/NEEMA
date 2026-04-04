@@ -31,3 +31,18 @@ a {
 * {
   box-sizing: border-box;
 }
+
+/* ✅ GLOBAL CURSOR FIX */
+button,
+[role="button"],
+a,
+select,
+input[type="checkbox"],
+input[type="radio"] {
+  cursor: pointer;
+}
+
+/* Optional: disabled state */
+button:disabled {
+  cursor: not-allowed;
+}

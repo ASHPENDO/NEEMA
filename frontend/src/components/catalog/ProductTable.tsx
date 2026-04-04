@@ -37,6 +37,9 @@ type ProductTableProps = {
   onToggleSelectAll: (checked: boolean) => void;
   onEdit: (item: CatalogItem) => void;
   onDelete: (item: CatalogItem) => void;
+
+  /* ✅ NEW */
+  onRowClick?: (item: CatalogItem) => void;
 };
 
 export function ProductTable({
@@ -48,6 +51,7 @@ export function ProductTable({
   onToggleSelectAll,
   onEdit,
   onDelete,
+  onRowClick, // ✅ NEW
 }: ProductTableProps) {
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
 
@@ -104,6 +108,7 @@ export function ProductTable({
                 onToggleSelect={onToggleSelect}
                 onEdit={onEdit}
                 onDelete={onDelete}
+                onRowClick={onRowClick} // ✅ NEW
               />
             ))}
           </tbody>
@@ -121,6 +126,7 @@ function ProductRow({
   onToggleSelect,
   onEdit,
   onDelete,
+  onRowClick, // ✅ NEW
 }: {
   item: CatalogItem;
   canWrite: boolean;
@@ -129,12 +135,16 @@ function ProductRow({
   onToggleSelect: (itemId: string) => void;
   onEdit: (item: CatalogItem) => void;
   onDelete: (item: CatalogItem) => void;
+  onRowClick?: (item: CatalogItem) => void; // ✅ NEW
 }) {
   const [imageFailed, setImageFailed] = useState(false);
   const hasImage = Boolean(item.image_url && !imageFailed);
 
   return (
-    <tr className="border-t border-black/5 align-top">
+    <tr
+      className="border-t border-black/5 align-top cursor-pointer hover:bg-gray-50"
+      onClick={() => onRowClick?.(item)} // ✅ NEW
+    >
       <td className="px-4 py-3">
         <div className="flex items-center justify-center pt-1">
           <input
@@ -142,6 +152,7 @@ function ProductRow({
             aria-label={`Select ${item.title}`}
             checked={selected}
             onChange={() => onToggleSelect(item.id)}
+            onClick={(e) => e.stopPropagation()} // ✅ NEW
             className="h-4 w-4 rounded border-black/20"
           />
         </div>
@@ -188,12 +199,24 @@ function ProductRow({
       <td className="sticky right-0 z-[1] bg-white px-4 py-3 whitespace-nowrap shadow-[-8px_0_12px_-10px_rgba(0,0,0,0.15)]">
         <div className="flex justify-end gap-2">
           {canWrite && (
-            <Button variant="secondary" onClick={() => onEdit(item)}>
+            <Button
+              variant="secondary"
+              onClick={(e) => {
+                e.stopPropagation(); // ✅ NEW
+                onEdit(item);
+              }}
+            >
               Edit
             </Button>
           )}
           {canDelete && (
-            <Button variant="danger" onClick={() => onDelete(item)}>
+            <Button
+              variant="danger"
+              onClick={(e) => {
+                e.stopPropagation(); // ✅ NEW
+                onDelete(item);
+              }}
+            >
               Delete
             </Button>
           )}

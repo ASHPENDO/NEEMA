@@ -32,6 +32,9 @@ import {
   type ProductFormModalState,
 } from "../components/catalog/ProductFormModal";
 
+/* ✅ NEW IMPORT */
+import TemplatePreview from "../components/templates/TemplatePreview";
+
 function normalizeSearch(value: string) {
   return value.trim().toLowerCase();
 }
@@ -49,7 +52,6 @@ export default function Catalog() {
   const canImport = canImportCatalog(membership);
   const canDelete = canDeleteCatalog(membership);
 
-  // ✅ FIX: file input ref
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [items, setItems] = useState<CatalogItem[]>([]);
@@ -60,6 +62,9 @@ export default function Catalog() {
 
   const [q, setQ] = useState("");
   const [modal, setModal] = useState<ProductFormModalState>({ open: false });
+
+  /* ✅ NEW STATE */
+  const [selectedProduct, setSelectedProduct] = useState<CatalogItem | null>(null);
 
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -211,7 +216,6 @@ export default function Catalog() {
       right={
         <div className="flex gap-2">
 
-          {/* ✅ FIXED UPLOAD */}
           {canImport && (
             <>
               <input
@@ -242,20 +246,35 @@ export default function Catalog() {
     >
       <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search..." />
 
-      {loading ? (
-        <div>Loading...</div>
-      ) : (
-        <ProductTable
-          items={filteredItems}
-          canWrite={canWrite}
-          canDelete={canDelete}
-          selectedIds={selectedIds}
-          onToggleSelect={handleToggleSelect}
-          onToggleSelectAll={handleToggleSelectAll}
-          onEdit={(item) => setModal({ open: true, mode: "edit", initial: item })}
-          onDelete={(item) => void handleDelete(item)}
+      {/* ✅ FULL WIDTH TABLE */}
+      <div className="mt-4">
+        {loading ? (
+          <div>Loading...</div>
+        ) : (
+          <ProductTable
+            items={filteredItems}
+            canWrite={canWrite}
+            canDelete={canDelete}
+            selectedIds={selectedIds}
+            onToggleSelect={handleToggleSelect}
+            onToggleSelectAll={handleToggleSelectAll}
+            onEdit={(item) => {
+              setSelectedProduct(item);
+              setModal({ open: true, mode: "edit", initial: item });
+            }}
+            onDelete={(item) => void handleDelete(item)}
+            onRowClick={(item) => setSelectedProduct(item)} /* ✅ IMPORTANT */
+          />
+        )}
+      </div>
+
+      {/* ✅ FLOATING TEMPLATE PANEL */}
+      <div className="fixed top-20 right-4 w-[320px] z-40">
+        <TemplatePreview
+          product={selectedProduct}
+          allProducts={items}
         />
-      )}
+      </div>
 
       <ProductFormModal
         state={modal}

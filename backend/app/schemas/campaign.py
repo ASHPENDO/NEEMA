@@ -1,38 +1,34 @@
-from pydantic import BaseModel, HttpUrl, field_validator
+from pydantic import BaseModel
+from typing import Optional, List
 from datetime import datetime
-from typing import List
 from uuid import UUID
 
 
 class CampaignCreate(BaseModel):
-    name: str
-    caption: str
-    media_url: HttpUrl
-    platforms: List[str]
-    scheduled_at: datetime
-    page_ids: List[str]
+    product_id: UUID
+    template_id: str
 
-    @field_validator("scheduled_at")
-    @classmethod
-    def normalize_datetime(cls, v: datetime) -> datetime:
-        if v.tzinfo is not None:
-            return v.astimezone().replace(tzinfo=None)
-        return v
+    caption: str
+    media_url: Optional[str] = None
+
+    # MVP defaults handled in service
+    platforms: Optional[List[str]] = None
+    page_ids: Optional[List[str]] = None
+
+    scheduled_at: Optional[datetime] = None
+    name: Optional[str] = None
 
 
 class CampaignResponse(BaseModel):
-    id: str
-    name: str
-    status: str
-    scheduled_at: datetime
+    id: UUID
+    product_id: UUID
+    template_id: str
 
-    # ✅ Convert UUID → string automatically
-    @field_validator("id", mode="before")
-    @classmethod
-    def convert_uuid(cls, v):
-        if isinstance(v, UUID):
-            return str(v)
-        return v
+    caption: str
+    media_url: Optional[str]
+
+    status: str
+    scheduled_at: Optional[datetime]
 
     class Config:
         from_attributes = True

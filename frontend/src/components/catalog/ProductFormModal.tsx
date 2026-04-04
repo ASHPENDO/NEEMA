@@ -104,6 +104,7 @@ export function ProductFormModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="flex max-h-[90vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl bg-white shadow-lg">
 
+        {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b">
           <div className="text-lg font-semibold">
             {state.mode === "create" ? "Add product" : "Edit product"}
@@ -111,35 +112,97 @@ export function ProductFormModal({
           <button onClick={onClose} disabled={busy}>✕</button>
         </div>
 
-        <div className="p-4 space-y-3">
+        {/* Form */}
+        <div className="p-4 space-y-4">
 
-          <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" />
-
-          <Input value={sku} onChange={(e) => setSku(e.target.value)} placeholder="SKU" />
-
-          <Input value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="Image URL" />
-
-          <Input value={priceAmount} onChange={(e) => setPriceAmount(e.target.value)} placeholder="Price" />
-
-          <Input value={priceCurrency} onChange={(e) => setPriceCurrency(e.target.value)} placeholder="Currency" />
-
-          <textarea
-            className="w-full border rounded p-2"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Description"
+          <InputField
+            label="Product Name *"
+            value={title}
+            onChange={setTitle}
+            placeholder="e.g. Samsung Galaxy S10"
           />
+
+          <InputField
+            label="SKU"
+            value={sku}
+            onChange={setSku}
+            placeholder="Optional SKU"
+          />
+
+          <InputField
+            label="Image URL"
+            value={imageUrl}
+            onChange={setImageUrl}
+            placeholder="https://..."
+          />
+
+          <div className="grid grid-cols-2 gap-3">
+            <InputField
+              label="Price *"
+              value={priceAmount}
+              onChange={setPriceAmount}
+              placeholder="e.g. 20000"
+            />
+
+            <InputField
+              label="Currency"
+              value={priceCurrency}
+              onChange={setPriceCurrency}
+              placeholder="KES"
+            />
+          </div>
+
+          <div>
+            <div className="mb-1 text-xs font-medium opacity-70">
+              Description
+            </div>
+            <textarea
+              className="w-full rounded-xl border border-black/10 p-3 text-sm"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Product description..."
+            />
+          </div>
 
         </div>
 
+        {/* Footer */}
         <div className="flex justify-end gap-2 p-4 border-t">
-          <Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button>
+          <Button variant="secondary" onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
           <Button onClick={() => void handleSubmit()} disabled={busy}>
             {busy ? "Saving..." : "Save"}
           </Button>
         </div>
 
       </div>
+    </div>
+  );
+}
+
+/* 🔧 Helper component (clean labels) */
+function InputField({
+  label,
+  value,
+  onChange,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+}) {
+  return (
+    <div>
+      <div className="mb-1 text-xs font-medium opacity-70">
+        {label}
+      </div>
+      <Input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+      />
     </div>
   );
 }

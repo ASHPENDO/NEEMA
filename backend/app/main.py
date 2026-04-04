@@ -7,7 +7,9 @@ import asyncio
 from app.core.config import settings
 import app.models  # noqa: F401
 
+# -----------------------------
 # Routers
+# -----------------------------
 from app.api.v1.auth import router as auth_router
 from app.api.v1.tenants import router as tenants_router
 from app.api.v1.tenant_invitations import router as tenant_invitations_router
@@ -18,12 +20,15 @@ from app.api.v1.catalog import router as catalog_router
 from app.api.v1.social_oauth import router as social_oauth_router
 from app.api.v1.facebook_catalog import router as facebook_catalog_router
 
-# ✅ Unified posting
+# ✅ Posting
 from app.api.v1.endpoints.posting import router as posting_router
+
+# ✅ Campaign (NEW)
+from app.api.v1.campaign import router as campaign_router
 
 # ✅ Scheduler
 from app.services.scheduler import campaign_scheduler
-from app.api.v1.campaigns import router as campaigns_router
+
 
 def create_application() -> FastAPI:
     app = FastAPI(title="POSTIKA API")
@@ -58,7 +63,6 @@ def create_application() -> FastAPI:
     # -----------------------------
     @app.on_event("startup")
     async def start_scheduler():
-        # Prevent duplicate schedulers in reload mode
         if not hasattr(app.state, "scheduler_started"):
             app.state.scheduler_started = True
             asyncio.create_task(campaign_scheduler())
@@ -76,18 +80,27 @@ def create_application() -> FastAPI:
     # -----------------------------
     # API Routers
     # -----------------------------
-    app.include_router(auth_router, prefix="/api/v1")
-    app.include_router(tenants_router, prefix="/api/v1")
-    app.include_router(tenant_invitations_router, prefix="/api/v1")
-    app.include_router(platform_invitations_router, prefix="/api/v1")
-    app.include_router(sales_router, prefix="/api/v1")
-    app.include_router(platform_sales_router, prefix="/api/v1")
-    app.include_router(catalog_router, prefix="/api/v1")
-    app.include_router(social_oauth_router, prefix="/api/v1")
-    app.include_router(facebook_catalog_router, prefix="/api/v1")
-    app.include_router(campaigns_router, prefix="/api/v1")
-    # ✅ Posting system
-    app.include_router(posting_router, prefix="/api/v1")
+    api_prefix = "/api/v1"
+
+    app.include_router(auth_router, prefix=api_prefix)
+    app.include_router(tenants_router, prefix=api_prefix)
+    app.include_router(tenant_invitations_router, prefix=api_prefix)
+    app.include_router(platform_invitations_router, prefix=api_prefix)
+    app.include_router(sales_router, prefix=api_prefix)
+    app.include_router(platform_sales_router, prefix=api_prefix)
+    app.include_router(catalog_router, prefix=api_prefix)
+    app.include_router(social_oauth_router, prefix=api_prefix)
+    app.include_router(facebook_catalog_router, prefix=api_prefix)
+
+    # ✅ Campaigns (CORE FEATURE)
+    app.include_router(
+        campaign_router,
+        prefix=f"{api_prefix}/campaigns",
+        tags=["Campaigns"],
+    )
+
+    # ✅ Posting
+    app.include_router(posting_router, prefix=api_prefix)
 
     return app
 

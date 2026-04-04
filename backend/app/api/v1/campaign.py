@@ -3,22 +3,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.schemas.campaign import CampaignCreate, CampaignResponse
 from app.services.campaign_service import CampaignService
-from app.api.dependencies import get_db, get_current_user
+from app.db.session import get_db
 
-router = APIRouter(prefix="/campaigns", tags=["Campaigns"])
+router = APIRouter()
 
 
 @router.post("/", response_model=CampaignResponse)
-async def create_campaign(
+async def create_campaign_endpoint(
     payload: CampaignCreate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(get_current_user),
 ):
-    service = CampaignService(db)
+    # TODO: Replace with real tenant extraction
+    tenant_id = "00000000-0000-0000-0000-000000000000"
 
-    campaign = await service.create_campaign(
-        tenant_id=user.tenant_id,
-        data=payload
-    )
-
+    campaign = await CampaignService.create_campaign(db, tenant_id, payload)
     return campaign
