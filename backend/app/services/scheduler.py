@@ -1,12 +1,9 @@
-# app/services/scheduler.py
-
 import asyncio
 from sqlalchemy import select, func
 
 from app.db.session import async_session_maker
 from app.models.campaign import Campaign
 
-# 🔥 NEW
 from app.tasks.campaign_tasks import execute_campaign_task
 
 
@@ -33,10 +30,12 @@ async def campaign_scheduler():
                 try:
                     print(f"[QUEUE] Dispatching campaign {campaign.id}")
 
-                    campaign.status = "queued"
+                    # ✅ MOVE TO PROCESSING (NOT QUEUED)
+                    campaign.status = "processing"
+
                     await db.commit()
 
-                    # 🔥 SEND TO CELERY WORKER
+                    # 🔥 SEND TO CELERY
                     execute_campaign_task.delay(str(campaign.id))
 
                 except Exception as e:
