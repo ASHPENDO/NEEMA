@@ -1,4 +1,5 @@
 // src/components/PageShell.tsx
+
 import React from "react";
 import { motion } from "framer-motion";
 
@@ -20,15 +21,19 @@ export function PageShell({
       initial={{ opacity: 0, y: 14 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
-      className="w-full"
+      className="relative z-0 w-full isolate" // ✅ KEY FIX
     >
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm lg:p-6">
+      <div className="relative z-10 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm lg:p-6">
         <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div className="min-w-0">
-            <div className="text-xs font-semibold tracking-wide text-slate-500">POSTIKA</div>
+            <div className="text-xs font-semibold tracking-wide text-slate-500">
+              POSTIKA
+            </div>
 
             <div className="mt-1 flex flex-wrap items-center gap-2">
-              <h1 className="text-2xl font-semibold text-slate-900">{title}</h1>
+              <h1 className="text-2xl font-semibold text-slate-900">
+                {title}
+              </h1>
 
               {workspaceName ? (
                 <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-700">
@@ -37,13 +42,18 @@ export function PageShell({
               ) : null}
             </div>
 
-            {subtitle ? <p className="mt-2 text-sm text-slate-600">{subtitle}</p> : null}
+            {subtitle ? (
+              <p className="mt-2 text-sm text-slate-600">{subtitle}</p>
+            ) : null}
           </div>
 
           {right ? <div className="shrink-0">{right}</div> : null}
         </div>
 
-        {children}
+        {/* ✅ Ensure children are always interactive */}
+        <div className="relative z-10">
+          {children}
+        </div>
       </div>
     </motion.div>
   );

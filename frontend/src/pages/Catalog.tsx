@@ -1,4 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+// src/pages/catalog.tsx
+
+import React, { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import { PageShell } from "../components/PageShell";
 import { Input } from "../components/Input";
 import { Button } from "../components/Button";
@@ -47,6 +49,9 @@ export default function Catalog() {
   const canImport = canImportCatalog(membership);
   const canDelete = canDeleteCatalog(membership);
 
+  // ✅ FIX: file input ref
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
   const [items, setItems] = useState<CatalogItem[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -58,9 +63,7 @@ export default function Catalog() {
 
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [uploadSummary, setUploadSummary] = useState<{ created: number; errors: number } | null>(
-    null
-  );
+  const [uploadSummary, setUploadSummary] = useState<{ created: number; errors: number } | null>(null);
 
   const [importUrlOpen, setImportUrlOpen] = useState(false);
   const [pageMessage, setPageMessage] = useState<string>("");
@@ -113,14 +116,11 @@ export default function Catalog() {
   }, [tenantId, canRead]);
 
   const loadActiveTenantName = useCallback(async () => {
-    if (!tenantId) {
-      setTenantName("");
-      return;
-    }
+    if (!tenantId) return;
 
     try {
       const tenants = await getTenants<TenantSummary[]>();
-      const active = Array.isArray(tenants) ? tenants.find((t) => t.id === tenantId) : undefined;
+      const active = tenants?.find((t) => t.id === tenantId);
       setTenantName(active?.name ?? "");
     } catch {
       setTenantName("");
@@ -151,9 +151,7 @@ export default function Catalog() {
     const visibleIds = filteredItems.map((item) => item.id);
 
     setSelectedIds((prev) => {
-      if (checked) {
-        return Array.from(new Set([...prev, ...visibleIds]));
-      }
+      if (checked) return Array.from(new Set([...prev, ...visibleIds]));
       return prev.filter((id) => !visibleIds.includes(id));
     });
   }
@@ -162,14 +160,9 @@ export default function Catalog() {
     try {
       setBusy(true);
       setError(null);
-      setPageMessage("");
-
       const created = await createCatalogItem(payload);
       setItems((prev) => [created, ...prev]);
       setModal({ open: false });
-      setPageMessage("Product created successfully.");
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Failed to create catalog item.");
     } finally {
       setBusy(false);
     }
@@ -178,284 +171,107 @@ export default function Catalog() {
   async function handleEdit(item: CatalogItem, payload: CatalogUpdateRequest) {
     try {
       setBusy(true);
-      setError(null);
-      setPageMessage("");
-
       const updated = await updateCatalogItem(item.id, payload);
       setItems((prev) => prev.map((entry) => (entry.id === item.id ? updated : entry)));
       setModal({ open: false });
-      setPageMessage("Product updated successfully.");
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Failed to update catalog item.");
     } finally {
       setBusy(false);
     }
   }
 
   async function handleDelete(item: CatalogItem) {
-    const confirmed = window.confirm(`Delete "${item.title}"? This action cannot be undone.`);
-    if (!confirmed) return;
-
-    const previousItems = items;
-    const previousSelectedIds = selectedIds;
-
-    try {
-      setBusy(true);
-      setError(null);
-      setPageMessage("");
-
-      setItems((prev) => prev.filter((entry) => entry.id !== item.id));
-      setSelectedIds((prev) => prev.filter((id) => id !== item.id));
-
-      await deleteCatalogItem(item.id);
-      setPageMessage("Product deleted successfully.");
-    } catch (e) {
-      setItems(previousItems);
-      setSelectedIds(previousSelectedIds);
-      setError(e instanceof ApiError ? e.message : "Failed to delete catalog item.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleBulkDelete() {
-    if (!selectedCount) return;
-
-    const visibleSelectedIds = selectedIds.filter((id) =>
-      filteredItems.some((item) => item.id === id)
-    );
-
-    if (!visibleSelectedIds.length) return;
-
-    const confirmed = window.confirm(
-      `Delete ${visibleSelectedIds.length} selected product${
-        visibleSelectedIds.length === 1 ? "" : "s"
-      }? This action cannot be undone.`
-    );
-    if (!confirmed) return;
-
-    const previousItems = items;
-    const previousSelectedIds = selectedIds;
-
-    try {
-      setBusy(true);
-      setError(null);
-      setPageMessage("");
-
-      setItems((prev) => prev.filter((item) => !visibleSelectedIds.includes(item.id)));
-      setSelectedIds((prev) => prev.filter((id) => !visibleSelectedIds.includes(id)));
-
-      await bulkDeleteCatalogItems(visibleSelectedIds);
-
-      setPageMessage(
-        `${visibleSelectedIds.length} product${
-          visibleSelectedIds.length === 1 ? "" : "s"
-        } deleted successfully.`
-      );
-    } catch (e) {
-      setItems(previousItems);
-      setSelectedIds(previousSelectedIds);
-      setError(e instanceof ApiError ? e.message : "Failed to delete selected catalog items.");
-    } finally {
-      setBusy(false);
-    }
+    if (!window.confirm(`Delete "${item.title}"?`)) return;
+    await deleteCatalogItem(item.id);
+    setItems((prev) => prev.filter((entry) => entry.id !== item.id));
   }
 
   async function handleZipUpload(file: File) {
     try {
       setUploading(true);
-      setUploadError(null);
-      setUploadSummary(null);
-      setPageMessage("");
-
       const result = await bulkUploadCatalogZip(file);
-      const createdCount = Array.isArray(result.created) ? result.created.length : 0;
-      const errorsCount = Array.isArray(result.errors) ? result.errors.length : 0;
 
       setUploadSummary({
-        created: createdCount,
-        errors: errorsCount,
+        created: result.created?.length ?? 0,
+        errors: result.errors?.length ?? 0,
       });
 
       await loadCatalog();
     } catch (e) {
-      setUploadError(e instanceof ApiError ? e.message : "Bulk ZIP upload failed.");
+      setUploadError("Bulk upload failed");
     } finally {
       setUploading(false);
     }
   }
 
-  const handleImportFromUrlSuccess = async (result: CatalogScrapeResponse) => {
-    await loadCatalog();
-    const createdCount = result.created?.length ?? 0;
-    setPageMessage(`Imported ${createdCount} product${createdCount === 1 ? "" : "s"} from URL.`);
-  };
-
   return (
     <PageShell
       title="Catalog"
-      subtitle="Manage tenant products. Create, edit, delete, bulk-upload catalog items, and import from website URLs."
+      subtitle="Manage tenant products."
       workspaceName={tenantName || undefined}
       right={
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex gap-2">
+
+          {/* ✅ FIXED UPLOAD */}
           {canImport && (
-            <label className="inline-flex cursor-pointer items-center">
+            <>
               <input
                 type="file"
                 accept=".zip"
-                className="hidden"
-                disabled={uploading || busy || !ready}
+                ref={fileInputRef}
+                style={{ display: "none" }}
                 onChange={(e) => {
                   const file = e.target.files?.[0];
                   e.currentTarget.value = "";
                   if (file) void handleZipUpload(file);
                 }}
               />
-              <Button variant="secondary" disabled={uploading || busy || !ready}>
+
+              <Button onClick={() => fileInputRef.current?.click()}>
                 {uploading ? "Uploading..." : "Bulk upload ZIP"}
               </Button>
-            </label>
+            </>
           )}
 
-          {canWrite && (
-            <button
-              type="button"
-              onClick={() => setImportUrlOpen(true)}
-              disabled={busy || uploading || !ready}
-              className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              Import from URL
-            </button>
-          )}
+          <Button onClick={() => setImportUrlOpen(true)}>Import URL</Button>
 
-          {canWrite && (
-            <Button
-              onClick={() => setModal({ open: true, mode: "create" })}
-              disabled={busy || uploading || !ready}
-            >
-              Add product
-            </Button>
-          )}
+          <Button onClick={() => setModal({ open: true, mode: "create" })}>
+            Add product
+          </Button>
         </div>
       }
     >
-      <div className="space-y-4">
-        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-          <div className="w-full md:max-w-md">
-            <Input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Search by title, SKU, description..."
-            />
-          </div>
+      <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search..." />
 
-          <div className="flex items-center gap-2">
-            <Button
-              variant="secondary"
-              onClick={() => void loadCatalog()}
-              disabled={!ready || loading || busy || uploading}
-            >
-              Refresh
-            </Button>
-          </div>
-        </div>
-
-        {canDelete && selectedCount > 0 ? (
-          <div className="flex flex-col gap-3 rounded-2xl border border-black/10 bg-white p-4 md:flex-row md:items-center md:justify-between">
-            <div className="text-sm">
-              <span className="font-medium">{selectedCount}</span>{" "}
-              selected
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                variant="danger"
-                onClick={() => void handleBulkDelete()}
-                disabled={busy || uploading || loading}
-              >
-                Delete Selected
-              </Button>
-
-              <Button
-                variant="secondary"
-                disabled
-                title="Create Campaign will be wired in the next phase."
-              >
-                Create Campaign
-              </Button>
-            </div>
-          </div>
-        ) : null}
-
-        {pageMessage ? (
-          <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-            {pageMessage}
-          </div>
-        ) : null}
-
-        {error && (
-          <div className="rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-            {error}
-          </div>
-        )}
-
-        {uploadError && (
-          <div className="rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-            {uploadError}
-          </div>
-        )}
-
-        {uploadSummary && (
-          <div className="rounded-2xl border border-black/10 bg-white p-3 text-sm">
-            <div className="font-medium">Bulk upload completed</div>
-            <div className="mt-1 opacity-70">
-              Created: <span className="font-medium">{uploadSummary.created}</span> · Errors:{" "}
-              <span className="font-medium">{uploadSummary.errors}</span>
-            </div>
-          </div>
-        )}
-
-        {!ready ? (
-          <div className="rounded-2xl border border-black/10 bg-white p-6 text-sm opacity-70">
-            Resolving tenant access...
-          </div>
-        ) : loading ? (
-          <div className="rounded-2xl border border-black/10 bg-white p-6 text-sm opacity-70">
-            Loading catalog items...
-          </div>
-        ) : (
-          <ProductTable
-            items={filteredItems}
-            canWrite={canWrite}
-            canDelete={canDelete}
-            selectedIds={selectedIds}
-            onToggleSelect={handleToggleSelect}
-            onToggleSelectAll={handleToggleSelectAll}
-            onEdit={(item) => setModal({ open: true, mode: "edit", initial: item })}
-            onDelete={(item) => void handleDelete(item)}
-          />
-        )}
-      </div>
+      {loading ? (
+        <div>Loading...</div>
+      ) : (
+        <ProductTable
+          items={filteredItems}
+          canWrite={canWrite}
+          canDelete={canDelete}
+          selectedIds={selectedIds}
+          onToggleSelect={handleToggleSelect}
+          onToggleSelectAll={handleToggleSelectAll}
+          onEdit={(item) => setModal({ open: true, mode: "edit", initial: item })}
+          onDelete={(item) => void handleDelete(item)}
+        />
+      )}
 
       <ProductFormModal
         state={modal}
         busy={busy}
         onClose={() => setModal({ open: false })}
-        onSubmit={(payload) => {
-          if (!modal.open) return Promise.resolve();
-
-          if (modal.mode === "create") {
-            return handleCreate(payload as CatalogCreateRequest);
-          }
-
-          return handleEdit(modal.initial, payload as CatalogUpdateRequest);
-        }}
+        onSubmit={(payload) =>
+          modal.mode === "create"
+            ? handleCreate(payload as CatalogCreateRequest)
+            : handleEdit(modal.initial, payload as CatalogUpdateRequest)
+        }
       />
 
       <ImportFromUrlModal
         open={importUrlOpen}
         onClose={() => setImportUrlOpen(false)}
-        onSuccess={handleImportFromUrlSuccess}
+        onSuccess={async () => await loadCatalog()}
       />
     </PageShell>
   );

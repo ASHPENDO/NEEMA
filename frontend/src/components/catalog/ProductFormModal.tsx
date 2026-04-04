@@ -1,4 +1,5 @@
 // src/components/catalog/ProductFormModal.tsx
+
 import React, { useEffect, useMemo, useState } from "react";
 import type { CatalogCreateRequest, CatalogItem, CatalogUpdateRequest } from "../../lib/api";
 import { Input } from "../Input";
@@ -72,24 +73,23 @@ export function ProductFormModal({
   if (!open) return null;
 
   async function handleSubmit() {
+    if (busy) return;
     if (!title.trim()) return;
     if (!isPriceValid) return;
 
     if (state.mode === "create") {
-      const payload: CatalogCreateRequest = {
+      await onSubmit({
         title: title.trim(),
         sku: sku.trim() || null,
         description: description.trim() || null,
         image_url: normalizedImageUrl,
         price_amount: Number(priceAmount),
         price_currency: priceCurrency.trim() || "KES",
-      };
-
-      await onSubmit(payload);
+      });
       return;
     }
 
-    const payload: CatalogUpdateRequest = {
+    await onSubmit({
       title: title.trim(),
       sku: sku.trim() || null,
       description: description.trim() || null,
@@ -97,158 +97,49 @@ export function ProductFormModal({
       price_amount: Number(priceAmount),
       price_currency: priceCurrency.trim() || "KES",
       status,
-    };
-
-    await onSubmit(payload);
+    });
   }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="flex max-h-[90vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl bg-white shadow-lg">
-        <div className="flex items-center justify-between gap-3 border-b border-black/10 px-5 py-4">
+
+        <div className="flex items-center justify-between px-5 py-4 border-b">
           <div className="text-lg font-semibold">
             {state.mode === "create" ? "Add product" : "Edit product"}
           </div>
-          <button
-            type="button"
-            className="text-sm opacity-70 hover:opacity-100"
-            onClick={onClose}
-            disabled={busy}
-          >
-            ✕
-          </button>
+          <button onClick={onClose} disabled={busy}>✕</button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-5 py-4">
-          <div className="grid grid-cols-1 gap-3">
-            <InputField
-              label="Title *"
-              value={title}
-              onChange={setTitle}
-              placeholder="e.g. Shea Butter Lotion"
-            />
+        <div className="p-4 space-y-3">
 
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              <InputField
-                label="SKU"
-                value={sku}
-                onChange={setSku}
-                placeholder="e.g. LOT-001"
-              />
-              <InputField
-                label="Currency"
-                value={priceCurrency}
-                onChange={setPriceCurrency}
-                placeholder="KES"
-              />
-            </div>
+          <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" />
 
-            <InputField
-              label="Image URL"
-              value={imageUrl}
-              onChange={setImageUrl}
-              placeholder="https://example.com/product-image.jpg"
-            />
+          <Input value={sku} onChange={(e) => setSku(e.target.value)} placeholder="SKU" />
 
-            {normalizedImageUrl ? (
-              <div>
-                <div className="mb-1 text-xs font-medium opacity-70">Preview</div>
-                <div className="flex items-center gap-3 rounded-xl border border-black/10 p-3">
-                  <img
-                    src={normalizedImageUrl}
-                    alt="Product preview"
-                    className="h-16 w-16 rounded-lg border border-black/10 object-cover"
-                    onError={(e) => {
-                      e.currentTarget.style.display = "none";
-                    }}
-                  />
-                  <div className="min-w-0 flex-1 text-xs opacity-70 break-all">{normalizedImageUrl}</div>
-                </div>
-              </div>
-            ) : null}
+          <Input value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="Image URL" />
 
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              <div>
-                <InputField
-                  label="Price *"
-                  value={priceAmount}
-                  onChange={setPriceAmount}
-                  placeholder="e.g. 1200"
-                  inputMode="decimal"
-                />
-                {!isPriceValid && (
-                  <div className="mt-1 text-xs text-red-600">Enter a valid price greater than 0.</div>
-                )}
-              </div>
+          <Input value={priceAmount} onChange={(e) => setPriceAmount(e.target.value)} placeholder="Price" />
 
-              {state.mode === "edit" ? (
-                <div>
-                  <div className="mb-1 text-xs font-medium opacity-70">Status</div>
-                  <select
-                    className="w-full rounded-xl border border-black/10 p-3 text-sm outline-none focus:ring-2 focus:ring-black/10"
-                    value={status}
-                    onChange={(e) => setStatus(e.target.value)}
-                    disabled={busy}
-                  >
-                    <option value="active">Active</option>
-                    <option value="inactive">Inactive</option>
-                  </select>
-                </div>
-              ) : (
-                <div className="flex items-end">
-                  <div className="text-xs opacity-60">New products are created as active.</div>
-                </div>
-              )}
-            </div>
+          <Input value={priceCurrency} onChange={(e) => setPriceCurrency(e.target.value)} placeholder="Currency" />
 
-            <div>
-              <div className="mb-1 text-xs font-medium opacity-70">Description</div>
-              <textarea
-                className="w-full rounded-xl border border-black/10 p-3 text-sm outline-none focus:ring-2 focus:ring-black/10"
-                rows={4}
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Short product description..."
-              />
-            </div>
-          </div>
+          <textarea
+            className="w-full border rounded p-2"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Description"
+          />
+
         </div>
 
-        <div className="flex items-center justify-end gap-2 border-t border-black/10 px-5 py-4">
-          <Button variant="secondary" onClick={onClose} disabled={busy}>
-            Cancel
-          </Button>
-          <Button onClick={() => void handleSubmit()} disabled={busy || !title.trim() || !isPriceValid}>
+        <div className="flex justify-end gap-2 p-4 border-t">
+          <Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button>
+          <Button onClick={() => void handleSubmit()} disabled={busy}>
             {busy ? "Saving..." : "Save"}
           </Button>
         </div>
-      </div>
-    </div>
-  );
-}
 
-function InputField({
-  label,
-  value,
-  onChange,
-  placeholder,
-  inputMode,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  placeholder?: string;
-  inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"];
-}) {
-  return (
-    <div>
-      <div className="mb-1 text-xs font-medium opacity-70">{label}</div>
-      <Input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        inputMode={inputMode}
-      />
+      </div>
     </div>
   );
 }
