@@ -15,6 +15,10 @@ import Catalog from "../pages/Catalog";
 import TenantMembers from "../pages/TenantMembers";
 import TenantInvitations from "../pages/TenantInvitations";
 
+// ✅ NEW (Campaigns)
+import CampaignList from "../pages/CampaignList";
+import CampaignDetail from "../pages/CampaignDetail";
+
 import RequirePermissions from "../components/RequirePermissions";
 import AppLayout from "../components/layout/AppLayout";
 
@@ -62,6 +66,18 @@ export const router = createBrowserRouter([
             <TenantInvitations />
           </RequirePermissions>
         ),
+      },
+
+      // =========================================
+      // 🚀 NEW: CAMPAIGNS (DASHBOARD VISIBILITY)
+      // =========================================
+      {
+        path: "/campaigns",
+        element: <CampaignList />,
+      },
+      {
+        path: "/campaigns/:id",
+        element: <CampaignDetail />,
       },
     ],
   },

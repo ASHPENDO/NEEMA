@@ -427,3 +427,40 @@ export async function updateTenantMember(
 export const getTenantMembers = async <T = TenantMember[]>(): Promise<T> => {
   return (await listTenantMembers()) as unknown as T;
 };
+
+/*
+ * ============================================================================
+ * Campaigns (NEW - Visibility & Dashboard)
+ * ============================================================================
+ */
+
+export type Campaign = {
+  id: string;
+  caption: string;
+  media_url: string;
+  status: "scheduled" | "processing" | "posted" | "failed";
+  scheduled_at: string;
+  platforms: string[];
+  page_ids: string[];
+};
+
+export type PostHistory = {
+  id: string;
+  status: string;
+  external_post_id: string;
+  created_at: string;
+};
+
+export async function listCampaigns(): Promise<Campaign[]> {
+  return await get("/api/v1/campaigns/");
+}
+
+export async function getCampaign(campaignId: string): Promise<Campaign> {
+  return await get(`/api/v1/campaigns/${campaignId}`);
+}
+
+export async function getCampaignHistory(
+  campaignId: string
+): Promise<PostHistory[]> {
+  return await get(`/api/v1/campaigns/${campaignId}/history`);
+}
