@@ -23,8 +23,11 @@ from app.api.v1.facebook_catalog import router as facebook_catalog_router
 # ✅ Posting
 from app.api.v1.endpoints.posting import router as posting_router
 
-# ✅ Campaign (NEW)
+# ✅ Campaign creation/update (existing)
 from app.api.v1.campaign import router as campaign_router
+
+# ✅ Campaign visibility (NEW)
+from app.api.v1.endpoints.campaigns import router as campaigns_router
 
 # ✅ Scheduler
 from app.services.scheduler import campaign_scheduler
@@ -92,11 +95,17 @@ def create_application() -> FastAPI:
     app.include_router(social_oauth_router, prefix=api_prefix)
     app.include_router(facebook_catalog_router, prefix=api_prefix)
 
-    # ✅ Campaigns (CORE FEATURE)
+    # ✅ Campaign creation/update (existing)
     app.include_router(
         campaign_router,
         prefix=f"{api_prefix}/campaigns",
-        tags=["Campaigns"],
+        tags=["Campaign"],
+    )
+
+    # ✅ Campaign visibility (NEW DASHBOARD ENDPOINTS)
+    app.include_router(
+        campaigns_router,
+        prefix=f"{api_prefix}",
     )
 
     # ✅ Posting

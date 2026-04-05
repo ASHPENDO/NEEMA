@@ -46,12 +46,10 @@ def execute_campaign_task(self, campaign_id: str):
                 # ==================================================
                 if settings.SAFE_MODE:
 
-                    # Block scheduler execution
                     if not settings.SAFE_ENABLE_SCHEDULER_POSTING:
                         print("[SAFE MODE] Scheduler posting disabled")
                         return
 
-                    # Page whitelist check
                     allowed_pages = set(settings.SAFE_PAGE_IDS)
                     campaign_pages = set(campaign.page_ids or [])
 
@@ -59,7 +57,6 @@ def execute_campaign_task(self, campaign_id: str):
                         print(f"[SAFE MODE] Blocked page_ids: {campaign.page_ids}")
                         return
 
-                    # Human-like delay
                     print(f"[SAFE MODE] Waiting {settings.SAFE_POST_INTERVAL}s before posting...")
                     time.sleep(settings.SAFE_POST_INTERVAL)
 
@@ -68,7 +65,9 @@ def execute_campaign_task(self, campaign_id: str):
                 # ==================================================
                 payload = PostPayload(
                     caption=campaign.caption,
-                    media_url=campaign.media_url,
+                    image_url=campaign.media_url,
+                    page_id=campaign.page_ids[0],        # ✅ REQUIRED
+                    platform=campaign.platforms[0],      # ✅ REQUIRED
                     page_ids=campaign.page_ids,
                     platforms=campaign.platforms,
                 )
@@ -100,10 +99,7 @@ def execute_campaign_task(self, campaign_id: str):
                 release_lock(lock_key)
 
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(run())
-        loop.close()
+        asyncio.run(run())  # ✅ FIXED event loop handling
 
     except Exception as exc:
         print(f"[TASK RETRY] {campaign_id}: {str(exc)}")

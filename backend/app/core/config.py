@@ -85,9 +85,9 @@ class Settings(BaseSettings):
     # 🔐 SAFE MODE (NEW — DOES NOT BREAK EXISTING LOGIC)
     # ==================================================
     SAFE_MODE: bool = True
-    SAFE_PAGE_IDS: list[str] = ["YOUR_TEST_PAGE_ID"]
+    SAFE_PAGE_IDS: list[str] = ["1097989406733639"]
     SAFE_POST_INTERVAL: int = 120
-    SAFE_ENABLE_SCHEDULER_POSTING: bool = False
+    SAFE_ENABLE_SCHEDULER_POSTING: bool = True
     POSTING_MODE: str = "safe"
     # ==================================================
 
