@@ -1,9 +1,11 @@
 # app/services/posting/service.py
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, text
+from sqlalchemy import select, func
 from fastapi import HTTPException
 from datetime import datetime, timezone
+
+from app.core.config import settings  # ✅ ADDED
 
 from app.models.social_account import SocialAccount
 from app.models.post_history import PostHistory
@@ -23,31 +25,13 @@ class PostService:
         results = []
 
         # -----------------------------
-        # 🔍 DEBUG: DATABASE INSPECTION
-        # -----------------------------
-        try:
-            # Count rows
-            count_result = await db.execute(text("SELECT COUNT(*) FROM social_accounts"))
-            count = count_result.scalar()
-
-            # Fetch all accounts
-            all_result = await db.execute(select(SocialAccount))
-            all_accounts = all_result.scalars().all()
-
-            print(f"[DEBUG] DB COUNT social_accounts: {count}")
-            print(f"[DEBUG] ALL ACCOUNTS: {all_accounts}")
-
-        except Exception as e:
-            print(f"[DEBUG ERROR] DB inspection failed: {e}")
-
-        # -----------------------------
         # Normalize payload
         # -----------------------------
         platforms = getattr(payload, "platforms", None) or [payload.platform]
         page_ids = getattr(payload, "page_ids", None) or [payload.page_id]
 
         caption = getattr(payload, "caption", None) or getattr(payload, "message", "")
-        image_url = str(payload.image_url) if getattr(payload, "image_url", None) else None
+        media_url = str(payload.image_url) if getattr(payload, "image_url", None) else None  # ✅ UPDATED
 
         if not caption:
             raise HTTPException(status_code=400, detail="Caption/message is required")
@@ -69,18 +53,7 @@ class PostService:
                 print(f"[DEBUG] tenant_id={tenant_id}")
 
                 # -----------------------------
-                # 🔍 DEBUG: RAW QUERY CHECK
-                # -----------------------------
-                raw_check = await db.execute(
-                    select(SocialAccount).where(
-                        func.trim(SocialAccount.page_id) == page_id_str
-                    )
-                )
-                raw_accounts = raw_check.scalars().all()
-                print(f"[DEBUG] RAW MATCH (page_id only): {raw_accounts}")
-
-                # -----------------------------
-                # ✅ MAIN QUERY
+                # MAIN QUERY
                 # -----------------------------
                 result = await db.execute(
                     select(SocialAccount).where(
@@ -112,7 +85,7 @@ class PostService:
                     platform=platform,
                     page_id=page_id_str,
                     caption=caption,
-                    image_url=image_url,
+                    image_url=media_url,  # ✅ UPDATED
                     status="pending",
                 )
 
@@ -121,6 +94,26 @@ class PostService:
                 await db.refresh(history)
 
                 try:
+                    # -----------------------------
+                    # SAFE MODE GUARD ✅
+                    # -----------------------------
+                    if settings.POSTING_MODE == "safe":
+                        print(f"[SAFE MODE] Skipping real post → {platform} / {page_id_str}")
+
+                        history.status = "skipped"
+                        history.error_message = "Skipped due to safe mode"
+
+                        await db.commit()
+
+                        results.append({
+                            "platform": platform,
+                            "page_id": page_id_str,
+                            "status": "skipped",
+                            "reason": "safe_mode",
+                        })
+
+                        continue
+
                     print(f"[PostService] 🚀 Posting → {platform} / {page_id_str}")
 
                     result = await poster.post(payload, social_account)
@@ -146,11 +139,13 @@ class PostService:
 
                     await db.rollback()
 
-                    history.status = "failed"
-                    history.error_message = str(e)
+                    # ✅ FIXED: re-fetch after rollback
+                    history = await db.get(PostHistory, history.id)
 
-                    db.add(history)
-                    await db.commit()
+                    if history:
+                        history.status = "failed"
+                        history.error_message = str(e)
+                        await db.commit()
 
                     results.append({
                         "platform": platform,
@@ -159,7 +154,12 @@ class PostService:
                         "error": str(e),
                     })
 
+        # -----------------------------
+        # ✅ CORRECT SUCCESS FLAG
+        # -----------------------------
+        overall_success = any(r["status"] == "success" for r in results)
+
         return {
-            "success": True,
+            "success": overall_success,
             "results": results,
         }

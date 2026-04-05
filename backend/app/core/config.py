@@ -88,6 +88,7 @@ class Settings(BaseSettings):
     SAFE_PAGE_IDS: list[str] = ["YOUR_TEST_PAGE_ID"]
     SAFE_POST_INTERVAL: int = 120
     SAFE_ENABLE_SCHEDULER_POSTING: bool = False
+    POSTING_MODE: str = "safe"
     # ==================================================
 
     # -----------------------------

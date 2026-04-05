@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Query, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete  # ✅ ADDED delete
 from urllib.parse import urlencode
 
 from app.db.session import get_db
@@ -176,6 +176,17 @@ async def meta_callback(
         print("PAGES FOUND =", len(pages_data))
 
     try:
+        # -----------------------------
+        # ✅ CLEAN OLD FACEBOOK CONNECTIONS (ADDED)
+        # -----------------------------
+        await db.execute(
+            delete(SocialAccount).where(
+                SocialAccount.tenant_id == state_data["tenant_id"],
+                SocialAccount.platform == "facebook",
+            )
+        )
+        await db.commit()
+
         for page in pages_data:
 
             existing_query = await db.execute(
@@ -216,7 +227,12 @@ async def meta_callback(
 
     except Exception as e:
         await db.rollback()
-        print("DB SAVE ERROR =", str(e))
+
+        try:
+            print("DB SAVE ERROR =", str(e))
+        except Exception as log_error:
+            print("LOGGING ERROR =", log_error)
+
         raise
 
     return {
