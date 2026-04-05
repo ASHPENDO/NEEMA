@@ -1,5 +1,3 @@
-# app/api/v1/social_oauth.py
-
 from fastapi import APIRouter, Query, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -18,6 +16,8 @@ import json
 import uuid
 from app.core.redis import redis_client
 
+from app.api.dependencies import get_current_user
+
 META_TOKEN_URL = "https://graph.facebook.com/v19.0/oauth/access_token"
 META_GRAPH_BASE = "https://graph.facebook.com/v19.0"
 
@@ -26,15 +26,38 @@ router = APIRouter(prefix="/social/meta", tags=["social-oauth"])
 
 @router.get("/connect")
 async def meta_connect(
-    tenant_id: str,
-    user_id: str,
+    current_user=Depends(get_current_user),
     force_reauth: bool = False,
 ):
     state = str(uuid.uuid4())
 
+    # 🔍 DEBUG: Inspect CurrentUser safely
+    try:
+        print("CURRENT USER RAW:", current_user)
+        print("CURRENT USER DICT:", getattr(current_user, "__dict__", {}))
+    except Exception as e:
+        print("DEBUG ERROR:", e)
+
+    # ✅ SAFE extraction (UPDATED — handles nested structures)
+    tenant_id = getattr(current_user, "tenant_id", None)
+
+    user_id = (
+        getattr(current_user, "user_id", None)
+        or getattr(current_user, "id", None)
+        or getattr(current_user, "sub", None)
+        or getattr(getattr(current_user, "user", None), "id", None)
+        or getattr(getattr(current_user, "user", None), "user_id", None)
+    )
+
+    if not tenant_id or not user_id:
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to extract tenant_id or user_id from CurrentUser",
+        )
+
     state_payload = {
-        "tenant_id": tenant_id,
-        "user_id": user_id,
+        "tenant_id": str(tenant_id),
+        "user_id": str(user_id),
     }
 
     await redis_client.set(
