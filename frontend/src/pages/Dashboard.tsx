@@ -5,6 +5,9 @@ import { useAuth } from "../auth/AuthContext";
 import { useAccess } from "../hooks/useAccess";
 import MetaConnectButton from "../components/MetaConnectButton";
 
+// ✅ ADD THIS IMPORT
+import CampaignList from "./CampaignList";
+
 export default function Dashboard() {
   const { me } = useAuth();
   const { tenantId, membership, error, ready } = useAccess();
@@ -65,6 +68,16 @@ export default function Dashboard() {
         <pre className="mt-2 overflow-auto text-xs text-slate-700">
           {JSON.stringify(me, null, 2)}
         </pre>
+      </div>
+
+      {/* ========================================= */}
+      {/* 🚀 TEMP: CAMPAIGNS DEBUG (SAFE INSERT) */}
+      {/* ========================================= */}
+      <div className="mt-6">
+        <div className="text-sm font-semibold text-slate-900 mb-2">
+          Campaigns (Debug)
+        </div>
+        <CampaignList />
       </div>
     </PageShell>
   );

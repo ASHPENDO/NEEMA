@@ -35,6 +35,9 @@ export default function Sidebar() {
     { label: "Catalog", to: "/catalog", visible: can("catalog.read") },
     { label: "Members", to: "/tenant-members", visible: can("tenant.members.read") },
     { label: "Invitations", to: "/tenant-invitations", visible: can("tenant.invites.manage") },
+
+    // ✅ ADDED (safe)
+    { label: "Campaigns", to: "/campaigns", visible: true },
   ];
 
   const visibleItems = items.filter((item) => item.visible);

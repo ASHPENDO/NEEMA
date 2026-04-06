@@ -427,7 +427,6 @@ export async function updateTenantMember(
 export const getTenantMembers = async <T = TenantMember[]>(): Promise<T> => {
   return (await listTenantMembers()) as unknown as T;
 };
-
 /*
  * ============================================================================
  * Campaigns (NEW - Visibility & Dashboard)
@@ -452,7 +451,7 @@ export type PostHistory = {
 };
 
 export async function listCampaigns(): Promise<Campaign[]> {
-  return await get("/api/v1/campaigns/");
+  return await get("/api/v1/campaigns");
 }
 
 export async function getCampaign(campaignId: string): Promise<Campaign> {

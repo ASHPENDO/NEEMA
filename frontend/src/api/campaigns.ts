@@ -1,36 +1,32 @@
-import { Campaign, PostHistory } from "../types/campaign";
+const BASE_URL = "http://localhost:8000/api/v1";
 
-const API_BASE = "http://localhost:8000/api/v1";
-
-export async function fetchCampaigns(token: string): Promise<Campaign[]> {
-  const res = await fetch(`${API_BASE}/campaigns/`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
-
-  return res.json();
+function getToken(): string {
+  try {
+    return localStorage.getItem("token") || "";
+  } catch {
+    return "";
+  }
 }
 
-export async function fetchCampaign(id: string, token: string): Promise<Campaign> {
-  const res = await fetch(`${API_BASE}/campaigns/${id}`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
+async function fetchCampaigns() {
+  try {
+    const res = await fetch(`${BASE_URL}/campaigns/`, {
+      headers: {
+        Authorization: `Bearer ${getToken()}`,
+        "Content-Type": "application/json",
+      },
+    });
 
-  return res.json();
+    if (!res.ok) return [];
+
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+  } catch (e) {
+    console.error("fetchCampaigns failed:", e);
+    return [];
+  }
 }
 
-export async function fetchCampaignHistory(
-  id: string,
-  token: string
-): Promise<PostHistory[]> {
-  const res = await fetch(`${API_BASE}/campaigns/${id}/history`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
-
-  return res.json();
-}
+export default {
+  fetchCampaigns,
+};

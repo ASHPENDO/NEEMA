@@ -15,9 +15,9 @@ import Catalog from "../pages/Catalog";
 import TenantMembers from "../pages/TenantMembers";
 import TenantInvitations from "../pages/TenantInvitations";
 
-// ✅ NEW (Campaigns)
 import CampaignList from "../pages/CampaignList";
 import CampaignDetail from "../pages/CampaignDetail";
+import CreateCampaign from "../pages/CreateCampaign"; // ✅ NEW
 
 import RequirePermissions from "../components/RequirePermissions";
 import AppLayout from "../components/layout/AppLayout";
@@ -25,7 +25,6 @@ import AppLayout from "../components/layout/AppLayout";
 export const router = createBrowserRouter([
   { path: "/", element: <Navigate to="/tenant-gate" replace /> },
 
-  // Public/Auth pages
   { path: "/login", element: <Login /> },
   { path: "/verify", element: <Verify /> },
   { path: "/accept-invitation", element: <AcceptInvitation /> },
@@ -35,7 +34,6 @@ export const router = createBrowserRouter([
   { path: "/tenant-create", element: <TenantCreate /> },
   { path: "/profile-completion", element: <ProfileCompletion /> },
 
-  // Application layout
   {
     element: <AppLayout />,
     children: [
@@ -68,13 +66,16 @@ export const router = createBrowserRouter([
         ),
       },
 
-      // =========================================
-      // 🚀 NEW: CAMPAIGNS (DASHBOARD VISIBILITY)
-      // =========================================
       {
         path: "/campaigns",
         element: <CampaignList />,
       },
+
+      {
+        path: "/campaigns/create", // ✅ NEW
+        element: <CreateCampaign />,
+      },
+
       {
         path: "/campaigns/:id",
         element: <CampaignDetail />,
