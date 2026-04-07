@@ -30,13 +30,15 @@ async def campaign_scheduler():
                 try:
                     print(f"[QUEUE] Dispatching campaign {campaign.id}")
 
-                    # ✅ MOVE TO PROCESSING (NOT QUEUED)
+                    # ✅ MOVE TO PROCESSING
                     campaign.status = "processing"
 
-                    await db.commit()
+                    await db.commit()  # ✅ ensure DB state is saved BEFORE dispatch
 
-                    # 🔥 SEND TO CELERY
-                    execute_campaign_task.delay(str(campaign.id))
+                    # ✅ PASS campaign_id explicitly (string-safe)
+                    execute_campaign_task.delay(
+                        campaign_id=str(campaign.id)
+                    )
 
                 except Exception as e:
                     print(f"[SCHEDULER ERROR] {campaign.id}: {e}")

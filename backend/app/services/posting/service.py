@@ -5,10 +5,12 @@ from sqlalchemy import select, func
 from fastapi import HTTPException
 from datetime import datetime, timezone
 
-from app.core.config import settings  # ✅ ADDED
+from app.core.config import settings
 
 from app.models.social_account import SocialAccount
 from app.models.post_history import PostHistory
+from app.models.campaign import Campaign  # ✅ NEW
+
 from app.services.posting.registry import PLATFORM_REGISTRY
 
 
@@ -16,22 +18,16 @@ class PostService:
 
     @staticmethod
     async def publish(payload, tenant_id, db: AsyncSession):
-        """
-        Supports:
-        - Single platform (API)
-        - Multi-platform (Campaign execution)
-        """
-
         results = []
 
-        # -----------------------------
-        # Normalize payload
-        # -----------------------------
+        # ✅ OPTIONAL campaign_id (from scheduler)
+        campaign_id = getattr(payload, "campaign_id", None)
+
         platforms = getattr(payload, "platforms", None) or [payload.platform]
         page_ids = getattr(payload, "page_ids", None) or [payload.page_id]
 
         caption = getattr(payload, "caption", None) or getattr(payload, "message", "")
-        media_url = str(payload.image_url) if getattr(payload, "image_url", None) else None  # ✅ UPDATED
+        media_url = str(payload.image_url) if getattr(payload, "image_url", None) else None
 
         if not caption:
             raise HTTPException(status_code=400, detail="Caption/message is required")
@@ -52,9 +48,6 @@ class PostService:
                 print(f"[PostService] 🔍 Lookup: {platform} / {page_id_str}")
                 print(f"[DEBUG] tenant_id={tenant_id}")
 
-                # -----------------------------
-                # MAIN QUERY
-                # -----------------------------
                 result = await db.execute(
                     select(SocialAccount).where(
                         SocialAccount.tenant_id == tenant_id,
@@ -78,14 +71,15 @@ class PostService:
                 print(f"[PostService] ✅ Account found")
 
                 # -----------------------------
-                # Create history
+                # Create history (WITH campaign_id)
                 # -----------------------------
                 history = PostHistory(
                     tenant_id=tenant_id,
+                    campaign_id=campaign_id,  # ✅ NEW
                     platform=platform,
                     page_id=page_id_str,
                     caption=caption,
-                    image_url=media_url,  # ✅ UPDATED
+                    image_url=media_url,
                     status="pending",
                 )
 
@@ -94,9 +88,6 @@ class PostService:
                 await db.refresh(history)
 
                 try:
-                    # -----------------------------
-                    # SAFE MODE GUARD ✅
-                    # -----------------------------
                     if settings.POSTING_MODE == "safe":
                         print(f"[SAFE MODE] Skipping real post → {platform} / {page_id_str}")
 
@@ -139,7 +130,6 @@ class PostService:
 
                     await db.rollback()
 
-                    # ✅ FIXED: re-fetch after rollback
                     history = await db.get(PostHistory, history.id)
 
                     if history:
@@ -155,8 +145,18 @@ class PostService:
                     })
 
         # -----------------------------
-        # ✅ CORRECT SUCCESS FLAG
+        # FINAL: UPDATE CAMPAIGN STATUS ✅
         # -----------------------------
+        if campaign_id:
+            campaign = await db.get(Campaign, campaign_id)
+            if campaign:
+                if any(r["status"] == "success" for r in results):
+                    campaign.status = "posted"
+                else:
+                    campaign.status = "failed"
+
+                await db.commit()
+
         overall_success = any(r["status"] == "success" for r in results)
 
         return {

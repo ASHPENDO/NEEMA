@@ -13,6 +13,11 @@ import asyncio
 import time
 
 
+# ✅ GLOBAL EVENT LOOP
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
+
+
 @celery_app.task(
     bind=True,
     max_retries=5,
@@ -21,11 +26,19 @@ import time
 def execute_campaign_task(self, campaign_id: str):
 
     async def run():
+
+        # ==============================
+        # SESSION 1 → FETCH CAMPAIGN
+        # ==============================
         async with async_session_maker() as db:
             campaign = await db.get(Campaign, campaign_id)
 
             if not campaign:
                 print(f"[TASK] Campaign not found: {campaign_id}")
+                return
+
+            if campaign.status not in ["processing", "scheduled"]:
+                print(f"[TASK] Skipping campaign {campaign_id}, status={campaign.status}")
                 return
 
             lock_key = f"campaign:{campaign_id}"
@@ -34,72 +47,88 @@ def execute_campaign_task(self, campaign_id: str):
                 print(f"[LOCK] Skipping duplicate execution {campaign_id}")
                 return
 
-            try:
-                print(f"[TASK] Executing campaign {campaign_id}")
+            payload = PostPayload(
+                caption=campaign.caption,
+                image_url=campaign.media_url,
+                page_id=campaign.page_ids[0],
+                platform=campaign.platforms[0],
+                page_ids=campaign.page_ids,
+                platforms=campaign.platforms,
+                campaign_id=str(campaign.id),
+            )
 
-                if campaign.status not in ["processing", "scheduled"]:
-                    print(f"[TASK] Skipping campaign {campaign_id}, status={campaign.status}")
+            tenant_id = campaign.tenant_id
+
+        try:
+            print(f"[TASK] Executing campaign {campaign_id}")
+
+            # ==============================
+            # SAFE MODE
+            # ==============================
+            if settings.SAFE_MODE:
+
+                if not settings.SAFE_ENABLE_SCHEDULER_POSTING:
+                    print("[SAFE MODE] Scheduler posting disabled")
                     return
 
-                # ==================================================
-                # 🔐 SAFE MODE GUARDS
-                # ==================================================
-                if settings.SAFE_MODE:
+                allowed_pages = set(settings.SAFE_PAGE_IDS)
+                campaign_pages = set(payload.page_ids or [])
 
-                    if not settings.SAFE_ENABLE_SCHEDULER_POSTING:
-                        print("[SAFE MODE] Scheduler posting disabled")
-                        return
+                if not campaign_pages.issubset(allowed_pages):
+                    print(f"[SAFE MODE] Blocked page_ids: {payload.page_ids}")
+                    return
 
-                    allowed_pages = set(settings.SAFE_PAGE_IDS)
-                    campaign_pages = set(campaign.page_ids or [])
+                print(f"[SAFE MODE] Waiting {settings.SAFE_POST_INTERVAL}s...")
+                time.sleep(settings.SAFE_POST_INTERVAL)
 
-                    if not campaign_pages.issubset(allowed_pages):
-                        print(f"[SAFE MODE] Blocked page_ids: {campaign.page_ids}")
-                        return
-
-                    print(f"[SAFE MODE] Waiting {settings.SAFE_POST_INTERVAL}s before posting...")
-                    time.sleep(settings.SAFE_POST_INTERVAL)
-
-                # ==================================================
-                # 🔥 REAL POSTING
-                # ==================================================
-                payload = PostPayload(
-                    caption=campaign.caption,
-                    image_url=campaign.media_url,
-                    page_id=campaign.page_ids[0],        # ✅ REQUIRED
-                    platform=campaign.platforms[0],      # ✅ REQUIRED
-                    page_ids=campaign.page_ids,
-                    platforms=campaign.platforms,
-                )
-
+            # ==============================
+            # SESSION 2 → POSTING
+            # ==============================
+            async with async_session_maker() as db:
                 result = await PostService.publish(
                     payload=payload,
-                    tenant_id=campaign.tenant_id,
+                    tenant_id=tenant_id,
                     db=db,
                 )
 
-                print(f"[TASK] Post result: {result}")
+            print(f"[TASK] Post result: {result}")
 
-                # ==================================================
+            # ==============================
+            # SESSION 3 → STATUS UPDATE
+            # ==============================
+            async with async_session_maker() as db:
+                campaign = await db.get(Campaign, campaign_id)
 
-                campaign.status = "posted"
-                await db.commit()
+                if campaign:
+                    if result.get("success"):
+                        campaign.status = "posted"
+                    else:
+                        campaign.status = "failed"
 
-                print(f"[TASK] Completed campaign {campaign_id}")
+                    await db.commit()
 
-            except Exception as e:
-                print(f"[TASK ERROR] {campaign_id}: {e}")
+            print(f"[TASK] Completed campaign {campaign_id}")
 
-                campaign.status = "failed"
-                await db.commit()
+        except Exception as e:
+            print(f"[TASK ERROR] {campaign_id}: {e}")
 
-                raise
+            # ==============================
+            # SESSION 4 → FAILURE UPDATE
+            # ==============================
+            async with async_session_maker() as db:
+                campaign = await db.get(Campaign, campaign_id)
 
-            finally:
-                release_lock(lock_key)
+                if campaign:
+                    campaign.status = "failed"
+                    await db.commit()
+
+            raise
+
+        finally:
+            release_lock(lock_key)
 
     try:
-        asyncio.run(run())  # ✅ FIXED event loop handling
+        loop.run_until_complete(run())
 
     except Exception as exc:
         print(f"[TASK RETRY] {campaign_id}: {str(exc)}")

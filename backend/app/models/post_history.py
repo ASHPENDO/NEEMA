@@ -15,6 +15,10 @@ class PostHistory(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
     tenant_id = Column(UUID(as_uuid=True), nullable=False)
+
+    # ✅ NEW: LINK TO CAMPAIGN
+    campaign_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+
     platform = Column(String, nullable=False)
 
     page_id = Column(String, nullable=True)
