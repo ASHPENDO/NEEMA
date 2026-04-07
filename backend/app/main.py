@@ -29,6 +29,9 @@ from app.api.v1.campaign import router as campaign_router
 # ✅ Campaign visibility (NEW)
 from app.api.v1.endpoints.campaigns import router as campaigns_router
 
+# ✅ Templates (NEW)
+from app.api.v1.templates import router as templates_router  # ✅ NEW
+
 # ✅ Scheduler
 from app.services.scheduler import campaign_scheduler
 
@@ -54,25 +57,16 @@ def create_application() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # -----------------------------
-    # Root Health Check
-    # -----------------------------
     @app.get("/")
     def root():
         return {"status": "ok", "service": "postika"}
 
-    # -----------------------------
-    # Scheduler Startup
-    # -----------------------------
     @app.on_event("startup")
     async def start_scheduler():
         if not hasattr(app.state, "scheduler_started"):
             app.state.scheduler_started = True
             asyncio.create_task(campaign_scheduler())
 
-    # -----------------------------
-    # Static Media (Local Only)
-    # -----------------------------
     if settings.STORAGE_PROVIDER_NORMALIZED == "local":
         app.mount(
             settings.MEDIA_URL,
@@ -80,9 +74,6 @@ def create_application() -> FastAPI:
             name="media",
         )
 
-    # -----------------------------
-    # API Routers
-    # -----------------------------
     api_prefix = "/api/v1"
 
     app.include_router(auth_router, prefix=api_prefix)
@@ -95,17 +86,23 @@ def create_application() -> FastAPI:
     app.include_router(social_oauth_router, prefix=api_prefix)
     app.include_router(facebook_catalog_router, prefix=api_prefix)
 
-    # ✅ Campaign creation/update (existing)
+    # ✅ Campaign creation/update
     app.include_router(
         campaign_router,
         prefix=f"{api_prefix}/campaigns",
         tags=["Campaign"],
     )
 
-    # ✅ Campaign visibility (NEW DASHBOARD ENDPOINTS)
+    # ✅ Campaign visibility
     app.include_router(
         campaigns_router,
         prefix=f"{api_prefix}",
+    )
+
+    # ✅ Templates (NEW)
+    app.include_router(
+        templates_router,
+        prefix=api_prefix,
     )
 
     # ✅ Posting

@@ -1,32 +1,29 @@
+import axios from "axios";
+
+// ✅ SAFE BASE (bypasses broken api.ts)
 const BASE_URL = "http://localhost:8000/api/v1";
 
-function getToken(): string {
-  try {
-    return localStorage.getItem("token") || "";
-  } catch {
-    return "";
-  }
+const client = axios.create({
+  baseURL: BASE_URL,
+});
+
+export async function fetchCampaigns() {
+  const res = await client.get("/campaigns");
+  return res.data;
 }
 
-async function fetchCampaigns() {
-  try {
-    const res = await fetch(`${BASE_URL}/campaigns/`, {
-      headers: {
-        Authorization: `Bearer ${getToken()}`,
-        "Content-Type": "application/json",
-      },
-    });
+export async function fetchCampaign(id: string) {
+  const res = await client.get(`/campaigns/${id}`);
+  return res.data;
+}
 
-    if (!res.ok) return [];
-
-    const data = await res.json();
-    return Array.isArray(data) ? data : [];
-  } catch (e) {
-    console.error("fetchCampaigns failed:", e);
-    return [];
-  }
+export async function fetchCampaignHistory(id: string) {
+  const res = await client.get(`/campaigns/${id}/history`);
+  return res.data;
 }
 
 export default {
   fetchCampaigns,
+  fetchCampaign,
+  fetchCampaignHistory,
 };

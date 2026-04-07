@@ -37,7 +37,6 @@ console.log("[API] BASE_URL =", BASE_URL);
 
 const client = axios.create({
   baseURL: BASE_URL,
-  withCredentials: true,
 });
 
 function buildHeaders(opts: RequestOptions, contentType?: string): Record<string, string> {
@@ -429,7 +428,7 @@ export const getTenantMembers = async <T = TenantMember[]>(): Promise<T> => {
 };
 /*
  * ============================================================================
- * Campaigns (NEW - Visibility & Dashboard)
+ * Campaigns (OPTION A - BASE_URL includes /api/v1)
  * ============================================================================
  */
 
@@ -449,6 +448,12 @@ export type PostHistory = {
   external_post_id: string;
   created_at: string;
 };
+
+/*
+ * ============================================================================
+ * Campaigns (FIXED - USE /api/v1 PREFIX)
+ * ============================================================================
+ */
 
 export async function listCampaigns(): Promise<Campaign[]> {
   return await get("/api/v1/campaigns");
