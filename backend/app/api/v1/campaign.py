@@ -1,12 +1,12 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from datetime import datetime, timezone
+from sqlalchemy import select
 
 from app.schemas.campaign import CampaignCreate, CampaignResponse
 from app.services.campaign_service import CampaignService
 from app.db.session import get_db
 
-from app.api.dependencies import get_current_user  # ✅ NEW
+from app.models.social_account import SocialAccount
 
 router = APIRouter()
 
@@ -15,17 +15,36 @@ router = APIRouter()
 async def create_campaign_endpoint(
     payload: CampaignCreate,
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),  # ✅ NEW
 ):
-    # ✅ FIX: use real tenant
-    tenant_id = current_user.tenant_id
+    # ==============================
+    # 🔥 DERIVE TENANT FROM PAGE_ID
+    # ==============================
+    if not payload.page_ids or len(payload.page_ids) == 0:
+        raise HTTPException(status_code=400, detail="page_ids required")
 
-    # ✅ Ensure schedulable
-    payload_dict = payload.dict()
-    payload_dict["status"] = "scheduled"
-    payload_dict["scheduled_at"] = datetime.now(timezone.utc)
+    page_id = payload.page_ids[0]
 
-    payload = CampaignCreate(**payload_dict)
+    result = await db.execute(
+        select(SocialAccount).where(SocialAccount.page_id == page_id)
+    )
 
-    campaign = await CampaignService.create_campaign(db, tenant_id, payload)
+    social_account = result.scalar_one_or_none()
+
+    if not social_account:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No social account found for page_id {page_id}"
+        )
+
+    tenant_id = social_account.tenant_id
+
+    # ==============================
+    # CREATE CAMPAIGN WITH CORRECT TENANT
+    # ==============================
+    campaign = await CampaignService.create_campaign(
+        db,
+        tenant_id,
+        payload,
+    )
+
     return campaign

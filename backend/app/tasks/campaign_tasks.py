@@ -82,14 +82,19 @@ def execute_campaign_task(self, campaign_id: str):
                 time.sleep(settings.SAFE_POST_INTERVAL)
 
             # ==============================
-            # SESSION 2 → POSTING
+            # SESSION 2 → POSTING (SAFE WRAPPED)
             # ==============================
+            result = {"success": False}
+
             async with async_session_maker() as db:
-                result = await PostService.publish(
-                    payload=payload,
-                    tenant_id=tenant_id,
-                    db=db,
-                )
+                try:
+                    result = await PostService.publish(
+                        payload=payload,
+                        tenant_id=tenant_id,
+                        db=db,
+                    )
+                except Exception as e:
+                    print(f"[POST ERROR SAFE] {e}")
 
             print(f"[TASK] Post result: {result}")
 
