@@ -39,7 +39,7 @@ async def create_campaign_endpoint(
     tenant_id = social_account.tenant_id
 
     # ==============================
-    # CREATE CAMPAIGN WITH CORRECT TENANT
+    # CREATE CAMPAIGN
     # ==============================
     campaign = await CampaignService.create_campaign(
         db,

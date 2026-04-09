@@ -11,10 +11,8 @@ class CampaignService:
 
     @staticmethod
     async def create_campaign(db: AsyncSession, tenant_id, data):
-        if data.scheduled_at:
-            status = "scheduled"
-        else:
-            status = "draft"
+        # ✅ FIX: Always schedule immediately (MVP behavior)
+        status = "scheduled"
 
         campaign = Campaign(
             tenant_id=tenant_id,
@@ -35,10 +33,10 @@ class CampaignService:
             media_url=data.media_url,
 
             # SCHEDULING
-            scheduled_at=data.scheduled_at,
+            scheduled_at=data.scheduled_at,  # can be None
 
             # STATUS
-            status=status,
+            status=status,  # ✅ FIXED
 
             # TIMESTAMPS
             created_at=datetime.now(timezone.utc),

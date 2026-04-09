@@ -1,5 +1,5 @@
 import asyncio
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 
 from app.db.session import async_session_maker
 from app.models.campaign import Campaign
@@ -16,8 +16,11 @@ async def campaign_scheduler():
             result = await db.execute(
                 select(Campaign)
                 .where(
-                    Campaign.status.in_(["scheduled", "failed"]),
-                    Campaign.scheduled_at <= func.now(),
+                    Campaign.status == "scheduled",
+                    or_(
+                        Campaign.scheduled_at == None,
+                        Campaign.scheduled_at <= func.now(),
+                    )
                 )
                 .with_for_update(skip_locked=True)
             )
@@ -28,14 +31,18 @@ async def campaign_scheduler():
 
             for campaign in campaigns:
                 try:
+                    # 🔥 HARD GUARD (prevents ghost re-dispatch)
+                    if campaign.status != "scheduled":
+                        continue
+
                     print(f"[QUEUE] Dispatching campaign {campaign.id}")
 
-                    # ✅ MOVE TO PROCESSING
+                    # ✅ MOVE TO PROCESSING + mark attempt
                     campaign.status = "processing"
+                    campaign.last_attempt_at = func.now()  # ✅ NEW
 
-                    await db.commit()  # ✅ ensure DB state is saved BEFORE dispatch
+                    await db.commit()
 
-                    # ✅ PASS campaign_id explicitly (string-safe)
                     execute_campaign_task.delay(
                         campaign_id=str(campaign.id)
                     )

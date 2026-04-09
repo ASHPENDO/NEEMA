@@ -37,7 +37,8 @@ def execute_campaign_task(self, campaign_id: str):
                 print(f"[TASK] Campaign not found: {campaign_id}")
                 return
 
-            if campaign.status not in ["processing", "scheduled"]:
+            # 🔥 STRICT GUARD (NO RE-RUN)
+            if campaign.status != "processing":
                 print(f"[TASK] Skipping campaign {campaign_id}, status={campaign.status}")
                 return
 
@@ -82,7 +83,7 @@ def execute_campaign_task(self, campaign_id: str):
                 time.sleep(settings.SAFE_POST_INTERVAL)
 
             # ==============================
-            # SESSION 2 → POSTING (SAFE WRAPPED)
+            # SESSION 2 → POSTING
             # ==============================
             result = {"success": False}
 
@@ -99,17 +100,13 @@ def execute_campaign_task(self, campaign_id: str):
             print(f"[TASK] Post result: {result}")
 
             # ==============================
-            # SESSION 3 → STATUS UPDATE
+            # SESSION 3 → FINAL STATUS (ATOMIC)
             # ==============================
             async with async_session_maker() as db:
-                campaign = await db.get(Campaign, campaign_id)
+                campaign_db = await db.get(Campaign, campaign_id)
 
-                if campaign:
-                    if result.get("success"):
-                        campaign.status = "posted"
-                    else:
-                        campaign.status = "failed"
-
+                if campaign_db:
+                    campaign_db.status = "posted" if result.get("success") else "failed"
                     await db.commit()
 
             print(f"[TASK] Completed campaign {campaign_id}")
@@ -118,13 +115,13 @@ def execute_campaign_task(self, campaign_id: str):
             print(f"[TASK ERROR] {campaign_id}: {e}")
 
             # ==============================
-            # SESSION 4 → FAILURE UPDATE
+            # SESSION 4 → FAILURE GUARANTEE
             # ==============================
             async with async_session_maker() as db:
-                campaign = await db.get(Campaign, campaign_id)
+                campaign_db = await db.get(Campaign, campaign_id)
 
-                if campaign:
-                    campaign.status = "failed"
+                if campaign_db:
+                    campaign_db.status = "failed"
                     await db.commit()
 
             raise
