@@ -8,78 +8,111 @@ export default function CreateCampaign() {
   const [caption, setCaption] = useState("");
   const [imageUrl, setImageUrl] = useState("");
   const [platform, setPlatform] = useState("facebook");
+
   const [pageId, setPageId] = useState("");
   const [productId, setProductId] = useState("");
   const [templateId, setTemplateId] = useState("");
+
   const [templates, setTemplates] = useState<any[]>([]);
+  const [products, setProducts] = useState<any[]>([]);
+  const [pages, setPages] = useState<any[]>([]);
+
   const [loading, setLoading] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
 
+  // ==============================
+  // LOAD DATA
+  // ==============================
   useEffect(() => {
-    async function loadTemplates() {
+    async function loadAll() {
       try {
-        const res = await get("/api/v1/templates/");
+        const [tRes, pRes, sRes] = await Promise.all([
+          get("/api/v1/templates/"),
+          get("/api/v1/catalog/"),
+          get("/api/v1/social-accounts/"),
+        ]);
 
-        // 🔍 DEBUG LOGS
-        console.log("TEMPLATES RAW RESPONSE:", res);
-        console.log("TEMPLATES DATA:", res?.data);
+        setTemplates(Array.isArray(tRes.data) ? tRes.data : []);
+        setProducts(Array.isArray(pRes.data) ? pRes.data : []);
+        setPages(Array.isArray(sRes.data) ? sRes.data : []);
 
-        // ✅ SAFE PARSING (handles different API shapes)
-        const data = res?.data || res;
-
-        if (Array.isArray(data)) {
-          setTemplates(data);
-        } else {
-          console.error("Templates response is not an array:", data);
-          setTemplates([]);
-        }
       } catch (err) {
-        console.error("Failed to load templates", err);
+        console.error("Failed to load data", err);
       }
     }
 
-    loadTemplates();
+    loadAll();
   }, []);
 
+  // ==============================
+  // AI GENERATION
+  // ==============================
+  async function handleGenerateAI() {
+    if (!productId || !templateId) {
+      alert("Select product and template first");
+      return;
+    }
+
+    try {
+      setAiLoading(true);
+
+      const res = await post("/api/v1/ai/generate", {
+        product_id: productId,
+        template_id: templateId,
+      });
+
+      let data;
+
+      try {
+        data =
+          typeof res.data.data === "string"
+            ? JSON.parse(res.data.data)
+            : res.data.data;
+      } catch {
+        alert("AI returned invalid format");
+        return;
+      }
+
+      if (!data?.full_caption) {
+        alert("AI response missing caption");
+        return;
+      }
+
+      setCaption(data.full_caption);
+
+    } catch {
+      alert("AI generation failed");
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
+  // ==============================
+  // SUBMIT
+  // ==============================
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
 
-    const cleanCaption = caption.trim();
-    const cleanImageUrl = imageUrl.trim();
-    const cleanPageId = pageId.trim();
-    const cleanProductId = productId.trim();
-    const cleanTemplateId = templateId.trim();
-
-    if (!cleanCaption || !cleanImageUrl || !cleanPageId || !cleanProductId || !cleanTemplateId) {
-      alert("Please fill all fields");
+    if (!caption || !imageUrl || !pageId || !productId || !templateId) {
+      alert("Fill all fields");
       return;
     }
 
     try {
       setLoading(true);
 
-      const payload = {
-        caption: cleanCaption,
-        media_url: cleanImageUrl,
-        platforms: [platform.toLowerCase()],
-        page_ids: [cleanPageId],
-        product_id: cleanProductId,
-        template_id: cleanTemplateId,
-      };
-
-      console.log("PAYLOAD:", payload);
-
-      await post("/api/v1/campaigns", payload);
+      await post("/api/v1/campaigns", {
+        caption,
+        media_url: imageUrl,
+        platforms: [platform],
+        page_ids: [pageId],
+        product_id: productId,
+        template_id: templateId,
+      });
 
       navigate("/campaigns");
-    } catch (err: any) {
-      console.error("FULL ERROR:", err);
-      console.error("RESPONSE:", err?.response);
-
-      if (err?.response?.data) {
-        alert(JSON.stringify(err.response.data, null, 2));
-      } else {
-        alert("Failed to create campaign");
-      }
+    } catch {
+      alert("Failed to create campaign");
     } finally {
       setLoading(false);
     }
@@ -90,13 +123,59 @@ export default function CreateCampaign() {
       <h1 className="text-2xl font-bold mb-4">Create Campaign</h1>
 
       <form onSubmit={handleSubmit} className="space-y-4">
+
+        {/* PRODUCT */}
+        <select
+          value={productId}
+          onChange={(e) => setProductId(e.target.value)}
+          className="w-full border rounded p-2"
+        >
+          <option value="">Select Product</option>
+          {products.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.title}
+            </option>
+          ))}
+        </select>
+
+        {/* TEMPLATE */}
+        <select
+          value={templateId}
+          onChange={(e) => setTemplateId(e.target.value)}
+          className="w-full border rounded p-2"
+        >
+          <option value="">Select Template</option>
+          {templates.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name}
+            </option>
+          ))}
+        </select>
+
+        {/* PAGE */}
+        <select
+          value={pageId}
+          onChange={(e) => setPageId(e.target.value)}
+          className="w-full border rounded p-2"
+        >
+          <option value="">Select Page</option>
+          {pages.map((p) => (
+            <option key={p.id} value={p.page_id}>
+              {p.page_id}
+            </option>
+          ))}
+        </select>
+
+        {/* CAPTION */}
         <textarea
           placeholder="Caption"
           value={caption}
           onChange={(e) => setCaption(e.target.value)}
           className="w-full border rounded p-2"
+          disabled={aiLoading}
         />
 
+        {/* IMAGE */}
         <input
           placeholder="Image URL"
           value={imageUrl}
@@ -104,50 +183,21 @@ export default function CreateCampaign() {
           className="w-full border rounded p-2"
         />
 
-        <select
-          value={platform}
-          onChange={(e) => setPlatform(e.target.value)}
-          className="w-full border rounded p-2"
+        {/* AI BUTTON */}
+        <button
+          type="button"
+          onClick={handleGenerateAI}
+          disabled={aiLoading}
+          className="bg-blue-600 text-white px-4 py-2 rounded w-full"
         >
-          <option value="facebook">Facebook</option>
-        </select>
+          {aiLoading ? "Generating..." : "Generate with AI"}
+        </button>
 
-        <input
-          placeholder="Page ID"
-          value={pageId}
-          onChange={(e) => setPageId(e.target.value)}
-          className="w-full border rounded p-2"
-        />
-
-        <input
-          placeholder="Product ID"
-          value={productId}
-          onChange={(e) => setProductId(e.target.value)}
-          className="w-full border rounded p-2"
-        />
-
-        <select
-          value={templateId}
-          onChange={(e) => setTemplateId(e.target.value)}
-          className="w-full border rounded p-2"
-        >
-          <option value="">Select Template</option>
-
-          {templates && templates.length > 0 ? (
-            templates.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))
-          ) : (
-            <option disabled>Loading templates...</option>
-          )}
-        </select>
-
+        {/* SUBMIT */}
         <button
           type="submit"
           disabled={loading}
-          className="bg-slate-900 text-white px-4 py-2 rounded"
+          className="bg-slate-900 text-white px-4 py-2 rounded w-full"
         >
           {loading ? "Creating..." : "Create Campaign"}
         </button>

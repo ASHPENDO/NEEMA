@@ -1,9 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-
 import asyncio
-
 from app.core.config import settings
 import app.models  # noqa: F401
 
@@ -16,24 +14,21 @@ from app.api.v1.tenant_invitations import router as tenant_invitations_router
 from app.api.v1.platform_invitations import router as platform_invitations_router
 from app.api.v1.sales import router as sales_router
 from app.api.v1.platform_sales import router as platform_sales_router
-from app.api.v1.catalog import router as catalog_router
+from app.api.v1.catalog import router as catalog_router, catalog_alias_router
 from app.api.v1.social_oauth import router as social_oauth_router
 from app.api.v1.facebook_catalog import router as facebook_catalog_router
-
 # ✅ Posting
 from app.api.v1.endpoints.posting import router as posting_router
-
 # ✅ Campaign creation/update (existing)
 from app.api.v1.campaign import router as campaign_router
-
 # ✅ Campaign visibility (NEW)
 from app.api.v1.endpoints.campaigns import router as campaigns_router
-
 # ✅ Templates (NEW)
-from app.api.v1.templates import router as templates_router  # ✅ NEW
-
+from app.api.v1.templates import router as templates_router
 # ✅ Scheduler
 from app.services.scheduler import campaign_scheduler
+from app.api.v1.ai import router as ai_router
+from app.api.v1.social_accounts import router as social_accounts_router
 
 
 def create_application() -> FastAPI:
@@ -82,7 +77,12 @@ def create_application() -> FastAPI:
     app.include_router(platform_invitations_router, prefix=api_prefix)
     app.include_router(sales_router, prefix=api_prefix)
     app.include_router(platform_sales_router, prefix=api_prefix)
+
+    # Catalog: /api/v1/catalog/items (full CRUD + scrape)
     app.include_router(catalog_router, prefix=api_prefix)
+    # Catalog: /api/v1/catalog/ (alias list endpoint)
+    app.include_router(catalog_alias_router, prefix=api_prefix)
+
     app.include_router(social_oauth_router, prefix=api_prefix)
     app.include_router(facebook_catalog_router, prefix=api_prefix)
 
@@ -99,7 +99,7 @@ def create_application() -> FastAPI:
         prefix=f"{api_prefix}",
     )
 
-    # ✅ Templates (NEW)
+    # ✅ Templates
     app.include_router(
         templates_router,
         prefix=api_prefix,
@@ -107,6 +107,17 @@ def create_application() -> FastAPI:
 
     # ✅ Posting
     app.include_router(posting_router, prefix=api_prefix)
+
+    # ✅ AI
+    app.include_router(
+        ai_router,
+        prefix=api_prefix,
+    )
+
+    app.include_router(
+        social_accounts_router,
+        prefix=api_prefix,
+    )
 
     return app
 

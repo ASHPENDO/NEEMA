@@ -31,6 +31,32 @@ from .catalog_upload import router as catalog_upload_router
 
 router = APIRouter(prefix="/catalog/items", tags=["catalog"])
 
+# ------------------------------------------------------------------
+# Alias router: GET /catalog/ — lightweight tenant-scoped list
+# (safe duplicate of the /catalog/items GET, for callers that hit
+#  the shorter path; uses the same auth pattern as the rest of this
+#  module so no new dependencies are introduced)
+# ------------------------------------------------------------------
+
+catalog_alias_router = APIRouter(prefix="/catalog", tags=["catalog"])
+
+
+@catalog_alias_router.get("/", response_model=List[CatalogItemResponse])
+async def list_catalog_items_alias(
+    db: AsyncSession = Depends(get_db),
+    membership=Depends(get_current_membership),
+    _=Depends(require_permissions("catalog:read")),
+):
+    """Alias for GET /catalog/items — returns all active catalog items for the
+    current tenant, newest first."""
+    stmt = (
+        select(CatalogItem)
+        .where(CatalogItem.tenant_id == membership.tenant_id)
+        .order_by(CatalogItem.created_at.desc())
+    )
+    result = await db.execute(stmt)
+    return result.scalars().all()
+
 
 # ------------------------------------------------------------------
 # Helpers

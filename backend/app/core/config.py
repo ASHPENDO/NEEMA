@@ -81,6 +81,11 @@ class Settings(BaseSettings):
 
     FRONTEND_SOCIAL_CALLBACK_URL: str | None = None
 
+    # -----------------------------
+    # 🤖 AI (OPENAI)
+    # -----------------------------
+    OPENAI_API_KEY: str
+
     # ==================================================
     # 🔐 SAFE MODE (NEW — DOES NOT BREAK EXISTING LOGIC)
     # ==================================================
