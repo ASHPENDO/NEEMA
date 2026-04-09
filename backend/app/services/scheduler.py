@@ -1,9 +1,7 @@
 import asyncio
 from sqlalchemy import select, func, or_
-
 from app.db.session import async_session_maker
 from app.models.campaign import Campaign
-
 from app.tasks.campaign_tasks import execute_campaign_task
 
 
@@ -12,7 +10,6 @@ async def campaign_scheduler():
         print("[SCHEDULER] Tick...")
 
         async with async_session_maker() as db:
-
             result = await db.execute(
                 select(Campaign)
                 .where(
@@ -24,7 +21,6 @@ async def campaign_scheduler():
                 )
                 .with_for_update(skip_locked=True)
             )
-
             campaigns = result.scalars().all()
 
             print(f"[SCHEDULER] Found {len(campaigns)} campaigns")
@@ -35,12 +31,12 @@ async def campaign_scheduler():
                     if campaign.status != "scheduled":
                         continue
 
+                    print(f"[SCHEDULER] Tenant {campaign.tenant_id} → Campaign {campaign.id}")
                     print(f"[QUEUE] Dispatching campaign {campaign.id}")
 
                     # ✅ MOVE TO PROCESSING + mark attempt
                     campaign.status = "processing"
                     campaign.last_attempt_at = func.now()  # ✅ NEW
-
                     await db.commit()
 
                     execute_campaign_task.delay(

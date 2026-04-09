@@ -13,7 +13,7 @@ router = APIRouter(prefix="/campaigns", tags=["Campaigns"])
 
 
 # ==================================================
-# 📌 LIST CAMPAIGNS
+# 📌 LIST CAMPAIGNS (STRICT TENANT ISOLATION)
 # ==================================================
 @router.get("/")
 async def list_campaigns(
@@ -22,7 +22,7 @@ async def list_campaigns(
 ):
     result = await db.execute(
         select(Campaign)
-        .where(Campaign.tenant_id == current_user.tenant_id)
+        .where(Campaign.tenant_id == current_user.tenant_id)  # ✅ CRITICAL
         .order_by(Campaign.created_at.desc())
     )
 
@@ -32,7 +32,7 @@ async def list_campaigns(
 
 
 # ==================================================
-# 📌 GET SINGLE CAMPAIGN
+# 📌 GET SINGLE CAMPAIGN (STRICT)
 # ==================================================
 @router.get("/{campaign_id}")
 async def get_campaign(
@@ -40,20 +40,23 @@ async def get_campaign(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    campaign = await db.get(Campaign, campaign_id)
+    result = await db.execute(
+        select(Campaign).where(
+            Campaign.id == campaign_id,
+            Campaign.tenant_id == current_user.tenant_id,  # ✅ CRITICAL
+        )
+    )
+
+    campaign = result.scalar_one_or_none()
 
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
-
-    # 🔐 Tenant isolation
-    if campaign.tenant_id != current_user.tenant_id:
-        raise HTTPException(status_code=403, detail="Not authorized")
 
     return campaign
 
 
 # ==================================================
-# 📌 CAMPAIGN POST HISTORY
+# 📌 CAMPAIGN HISTORY (STRICT)
 # ==================================================
 @router.get("/{campaign_id}/history")
 async def campaign_history(
@@ -61,13 +64,18 @@ async def campaign_history(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    campaign = await db.get(Campaign, campaign_id)
+    # ✅ validate campaign belongs to tenant
+    result = await db.execute(
+        select(Campaign).where(
+            Campaign.id == campaign_id,
+            Campaign.tenant_id == current_user.tenant_id,
+        )
+    )
+
+    campaign = result.scalar_one_or_none()
 
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
-
-    if campaign.tenant_id != current_user.tenant_id:
-        raise HTTPException(status_code=403, detail="Not authorized")
 
     result = await db.execute(
         select(PostHistory)
@@ -78,56 +86,3 @@ async def campaign_history(
     history = result.scalars().all()
 
     return history
-
-
-# ==================================================
-# 🗑 DELETE CAMPAIGN
-# ==================================================
-@router.delete("/{campaign_id}")
-async def delete_campaign(
-    campaign_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-    campaign = await db.get(Campaign, campaign_id)
-
-    if not campaign:
-        raise HTTPException(status_code=404, detail="Campaign not found")
-
-    if campaign.tenant_id != current_user.tenant_id:
-        raise HTTPException(status_code=403, detail="Not allowed")
-
-    await db.delete(campaign)
-    await db.commit()
-
-    return {"status": "deleted"}
-
-
-# ==================================================
-# 🔁 RETRY CAMPAIGN
-# ==================================================
-@router.post("/{campaign_id}/retry")
-async def retry_campaign(
-    campaign_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-    campaign = await db.get(Campaign, campaign_id)
-
-    if not campaign:
-        raise HTTPException(status_code=404, detail="Campaign not found")
-
-    if campaign.tenant_id != current_user.tenant_id:
-        raise HTTPException(status_code=403, detail="Not allowed")
-
-    if campaign.status != "failed":
-        raise HTTPException(
-            status_code=400,
-            detail="Only failed campaigns can be retried"
-        )
-
-    campaign.status = "scheduled"
-
-    await db.commit()
-
-    return {"status": "retry_scheduled"}
