@@ -14,6 +14,31 @@ client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 class AIContentService:
 
     @staticmethod
+    def format_price(amount, currency):
+        """
+        🔥 Standardized currency formatting
+        """
+        try:
+            return f"{currency} {float(amount):,.0f}"
+        except Exception:
+            return f"{currency} {amount}"
+
+    @staticmethod
+    def format_price_psychology(amount, currency, mode="normal"):
+        """
+        🔥 Marketing-friendly price formatting
+        """
+        base = AIContentService.format_price(amount, currency)
+
+        if mode == "starting":
+            return f"Starting from {base}"
+        elif mode == "only":
+            return f"Only {base}"
+        elif mode == "deal":
+            return f"Now {base}"
+        return base
+
+    @staticmethod
     async def generate(db, product_id=None, template_id=None, product_ids=None):
 
         # ==============================
@@ -47,7 +72,7 @@ class AIContentService:
             )
 
             # ==============================
-            # CATEGORY EMOJI (NEW)
+            # CATEGORY EMOJI
             # ==============================
             def get_category_emoji(name: str):
                 name = name.lower()
@@ -60,17 +85,31 @@ class AIContentService:
                 return "🔥"
 
             # ==============================
-            # PRODUCT TEXT (WITH STOCK)
+            # PRODUCT TEXT (SMART PRICING)
             # ==============================
-            def format_product(p):
+            def format_product(p, index):
                 stock_text = ""
                 if hasattr(p, "stock") and p.stock:
                     stock_text = f" (Only {p.stock} left)"
-                return f"- {p.title} ({p.price_amount} {p.price_currency}){stock_text}"
+
+                # 🔥 First product = anchor pricing
+                if index == 0:
+                    formatted_price = AIContentService.format_price_psychology(
+                        p.price_amount,
+                        p.price_currency,
+                        mode="starting"
+                    )
+                else:
+                    formatted_price = AIContentService.format_price(
+                        p.price_amount,
+                        p.price_currency
+                    )
+
+                return f"- {p.title} ({formatted_price}){stock_text}"
 
             product_list_text = "\n".join([
-                format_product(p)
-                for p in products[:3]
+                format_product(p, idx)
+                for idx, p in enumerate(products[:3])
             ])
 
             emoji = get_category_emoji(base_product.title)
@@ -86,13 +125,18 @@ Location: {location}
 Contact: {contact}
 
 CONVERSION RULES:
-- Hook MUST include price or "starting from"
+- Hook MUST include pricing (use "Starting from" or "Only")
 - Highlight urgency if stock is low
-- Body should mention only 2–3 products
-- Keep sentences short (mobile users)
+- Mention 2–3 products max
+- Keep sentences short (mobile-first)
 - CTA MUST include:
   - location
   - WhatsApp or phone contact
+
+LOCALIZATION:
+- Use East African tone
+- Keep pricing natural (KES, UGX, TZS)
+- Avoid USD or foreign currency
 
 STYLE:
 - Energetic
@@ -117,7 +161,7 @@ Return ONLY valid JSON:
                     prompt += f"\n\nSTYLE:\nUse this tone/style: {template.name}"
 
         # ==============================
-        # SINGLE PRODUCT MODE (UNCHANGED)
+        # SINGLE PRODUCT MODE (ENHANCED)
         # ==============================
         else:
             product = await db.get(CatalogItem, product_id)
@@ -137,7 +181,14 @@ Return ONLY valid JSON:
                 template = await db.get(Template, template_id)
 
             product_name = product.title
-            price = f"{product.price_amount} {product.price_currency}"
+
+            # 🔥 SMART PRICE (psychology)
+            price = AIContentService.format_price_psychology(
+                product.price_amount,
+                product.price_currency,
+                mode="only"
+            )
+
             description = getattr(product, "description", "") or ""
 
             location = getattr(tenant, "business_location", "") or "your area"
@@ -160,13 +211,17 @@ Location: {location}
 Contact: {contact}
 
 INSTRUCTIONS:
-- Hook MUST include the price
+- Hook MUST include price (use "Only" or urgency framing)
 - Body MUST clearly describe the product
 - CTA MUST include BOTH:
   - location
   - contact (call or WhatsApp)
-- Keep it concise, persuasive, mobile-friendly
+- Keep it concise, persuasive, mobile-first
 - Use natural emojis
+
+LOCALIZATION:
+- Use East African tone
+- Keep pricing in local currency (KES, UGX, TZS)
 
 OUTPUT FORMAT:
 Return ONLY valid JSON:

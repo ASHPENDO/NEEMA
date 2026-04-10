@@ -11,6 +11,16 @@ class CampaignService:
     """
 
     @staticmethod
+    def format_price(amount, currency):
+        """
+        🔥 Central price formatter (currency-safe)
+        """
+        try:
+            return f"{currency} {float(amount):,.0f}"
+        except Exception:
+            return f"{currency} {amount}"
+
+    @staticmethod
     async def create_campaign(db: AsyncSession, tenant_id, data):
 
         # ==============================
@@ -53,9 +63,30 @@ class CampaignService:
         media_url = media_urls[0] if media_urls else None
 
         # ==============================
-        # DETERMINE PRIMARY PRODUCT (IMPORTANT)
+        # 🔥 PRICE CONTEXT (NEW - SAFE)
         # ==============================
-        # Required because DB still enforces product_id NOT NULL
+        primary_product = products[0]
+
+        formatted_price = None
+        if primary_product.price_amount and primary_product.price_currency:
+            formatted_price = CampaignService.format_price(
+                primary_product.price_amount,
+                primary_product.price_currency
+            )
+
+        # ==============================
+        # 🔥 CAPTION NORMALIZATION (SAFE)
+        # ==============================
+        caption = data.caption
+
+        # Only enhance if price placeholder exists
+        if formatted_price:
+            if "{price}" in caption:
+                caption = caption.replace("{price}", formatted_price)
+
+        # ==============================
+        # DETERMINE PRIMARY PRODUCT
+        # ==============================
         primary_product_id = data.product_id or product_ids[0]
 
         # ==============================
@@ -65,8 +96,8 @@ class CampaignService:
             tenant_id=tenant_id,
 
             # CORE LINKS
-            product_id=primary_product_id,  # ✅ always set
-            product_ids=product_ids,        # ✅ new multi-product support
+            product_id=primary_product_id,
+            product_ids=product_ids,
             template_id=data.template_id,
 
             # OPTIONAL
@@ -77,9 +108,9 @@ class CampaignService:
             page_ids=getattr(data, "page_ids", []),
 
             # CONTENT
-            caption=data.caption,
-            media_url=media_url,    # single fallback
-            media_urls=media_urls,  # multi support
+            caption=caption,
+            media_url=media_url,
+            media_urls=media_urls,
 
             # SCHEDULING
             scheduled_at=data.scheduled_at,

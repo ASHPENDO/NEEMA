@@ -1,6 +1,12 @@
 # app/models/__init__.py
 
-# Import models here so Alembic can discover metadata.
+"""
+Model registry for SQLAlchemy.
+
+IMPORTANT:
+- All models must be imported here so Alembic can detect them via Base.metadata.
+- Do NOT remove unused imports (noqa is intentional).
+"""
 
 # =========================
 # CORE
@@ -22,6 +28,7 @@ from app.models.salesperson_profile import SalespersonProfile  # noqa: F401
 # =========================
 # CATALOG (PHASE 4)
 # =========================
+# 🔥 REQUIRED for Alembic to detect price_currency changes
 from app.models.catalog_item import CatalogItem  # noqa: F401
 
 
@@ -45,6 +52,6 @@ from app.models.campaign import Campaign  # noqa: F401
 
 
 # =========================
-# TEMPLATES (NEW)
+# TEMPLATES
 # =========================
 from app.models.template import Template  # noqa: F401

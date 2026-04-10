@@ -5,6 +5,19 @@ from uuid import UUID
 
 
 # ==============================
+# OPTIONAL: Lightweight Product View (for response only)
+# ==============================
+class CampaignProduct(BaseModel):
+    id: UUID
+    title: Optional[str] = None
+    price_amount: Optional[float] = None
+    price_currency: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ==============================
 # CREATE SCHEMA (UPDATED)
 # ==============================
 class CampaignCreate(BaseModel):
@@ -38,24 +51,28 @@ class CampaignCreate(BaseModel):
 class CampaignResponse(BaseModel):
     id: UUID
 
-    # ✅ Keep for backward compatibility
+    # ✅ Backward compatibility
     product_id: Optional[UUID]
 
-    # ✅ NEW: multi-product visibility
+    # ✅ Multi-product
     product_ids: Optional[List[UUID]]
 
     template_id: Optional[str]
 
     caption: str
 
-    # ✅ Single
+    # ✅ Single media
     media_url: Optional[str]
 
-    # ✅ NEW: multi
+    # ✅ Multi media
     media_urls: Optional[List[str]]
 
     status: str
     scheduled_at: Optional[datetime]
+
+    # 🔥 NEW (optional, safe)
+    # Allows frontend to access price + currency for display
+    products: Optional[List[CampaignProduct]] = None
 
     class Config:
         from_attributes = True
