@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import campaignsApi from "../api/campaigns";
 import { useParams, useNavigate } from "react-router-dom";
 import { post, del } from "../lib/api";
+import { formatPrice } from "../utils/format";
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
 
@@ -50,12 +51,12 @@ export default function CampaignDetail() {
   const navigate = useNavigate();
 
   const [campaign, setCampaign] = useState<any>(null);
-  const [history, setHistory] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [history,  setHistory]  = useState<any[]>([]);
+  const [loading,  setLoading]  = useState(true);
   const [retrying, setRetrying] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  // ── Load — unchanged pattern from original ────────────────────────────────
+  // ── Load — preserved original pattern ────────────────────────────────────
   useEffect(() => {
     if (!id) return;
 
@@ -83,7 +84,6 @@ export default function CampaignDetail() {
     try {
       setRetrying(true);
       await post(`/api/v1/campaigns/${id}/retry`);
-      // Reload campaign to reflect updated status
       const c = await campaignsApi.fetchCampaign(id);
       setCampaign(c || null);
     } catch (err: any) {
@@ -99,7 +99,7 @@ export default function CampaignDetail() {
     try {
       setDeleting(true);
       await del(`/api/v1/campaigns/${id}`);
-      navigate(-1); // go back just like the original Back button
+      navigate(-1);
     } catch (err: any) {
       alert(err?.message || "Delete failed.");
       setDeleting(false);
@@ -108,7 +108,11 @@ export default function CampaignDetail() {
 
   // ── Loading — preserved from original ────────────────────────────────────
   if (loading) {
-    return <div className="p-6 text-gray-500 text-sm flex items-center gap-2"><Spinner /> Loading...</div>;
+    return (
+      <div className="p-6 text-gray-500 text-sm flex items-center gap-2">
+        <Spinner /> Loading...
+      </div>
+    );
   }
 
   if (!campaign) {
@@ -122,24 +126,28 @@ export default function CampaignDetail() {
     );
   }
 
-  // ── Derived — preserve originals, add multi-product fields ────────────────
-  const caption = campaign?.caption ?? "No caption";
-  const status  = campaign?.status ?? "unknown";
+  // ── Derived — preserve original fields ────────────────────────────────────
+  const caption   = campaign?.caption ?? "No caption";
+  const status    = campaign?.status  ?? "unknown";
   const platforms = Array.isArray(campaign?.platforms)
     ? campaign.platforms.join(", ")
     : "—";
 
-  // ✅ Build image list: prefer media_urls[], fall back to single media_url / image_url
-  const mediaUrls: string[] = Array.isArray(campaign?.media_urls) && campaign.media_urls.length > 0
-    ? campaign.media_urls
-    : campaign?.media_url
-    ? [campaign.media_url]
-    : campaign?.image_url
-    ? [campaign.image_url]
-    : [];
+  // ✅ Multi-image: prefer media_urls[], fall back to media_url / image_url
+  const mediaUrls: string[] =
+    Array.isArray(campaign?.media_urls) && campaign.media_urls.length > 0
+      ? campaign.media_urls
+      : campaign?.media_url
+      ? [campaign.media_url]
+      : campaign?.image_url
+      ? [campaign.image_url]
+      : [];
 
   // ✅ product_ids[]
   const productIds: string[] = Array.isArray(campaign?.product_ids) ? campaign.product_ids : [];
+
+  // ✅ products[] with price data (if backend returns them embedded)
+  const products: any[] = Array.isArray(campaign?.products) ? campaign.products : [];
 
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -151,7 +159,7 @@ export default function CampaignDetail() {
         ← Back
       </button>
 
-      {/* Title + status badge */}
+      {/* Title + status */}
       <div className="flex items-start justify-between gap-3 flex-wrap mb-4">
         <h1 className="text-xl font-bold text-gray-900 leading-snug flex-1">{caption}</h1>
         <StatusBadge status={status} />
@@ -163,15 +171,11 @@ export default function CampaignDetail() {
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
             Media ({mediaUrls.length} image{mediaUrls.length > 1 ? "s" : ""})
           </p>
-          <div
-            className={`grid gap-2 ${
-              mediaUrls.length === 1
-                ? "grid-cols-1"
-                : mediaUrls.length === 2
-                ? "grid-cols-2"
-                : "grid-cols-3"
-            }`}
-          >
+          <div className={`grid gap-2 ${
+            mediaUrls.length === 1 ? "grid-cols-1"
+            : mediaUrls.length === 2 ? "grid-cols-2"
+            : "grid-cols-3"
+          }`}>
             {mediaUrls.map((url, i) => (
               <img
                 key={i}
@@ -185,12 +189,41 @@ export default function CampaignDetail() {
         </div>
       )}
 
-      {/* Meta — preserved original fields + new ones */}
+      {/* ✅ Products with formatPrice — if backend returns embedded products */}
+      {products.length > 0 && (
+        <div className="mb-5">
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+            Products ({products.length})
+          </p>
+          <div className="space-y-2">
+            {products.map((p: any) => (
+              <div key={p.id} className="flex items-center gap-3 bg-gray-50 border rounded-xl px-3 py-2">
+                {p.image_url && (
+                  <img
+                    src={p.image_url}
+                    alt={p.title}
+                    className="w-10 h-10 object-cover rounded-lg border shrink-0"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                  />
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-gray-800 truncate">{p.title}</p>
+                  {/* ✅ formatPrice with currency */}
+                  <p className="text-xs text-gray-400">
+                    {formatPrice(Number(p.price_amount), p.price_currency ?? "KES")}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Meta — preserved original fields */}
       <div className="mt-4 space-y-1.5 text-sm text-slate-700 bg-gray-50 border rounded-xl p-4">
         <p><span className="font-semibold text-gray-500">Status:</span> {status}</p>
         <p><span className="font-semibold text-gray-500">Platforms:</span> {platforms}</p>
         {productIds.length > 0 && (
-          // ✅ product_ids[]
           <p>
             <span className="font-semibold text-gray-500">Products:</span>{" "}
             {productIds.length} product{productIds.length > 1 ? "s" : ""}
@@ -207,9 +240,8 @@ export default function CampaignDetail() {
         )}
       </div>
 
-      {/* ── ACTIONS ── */}
+      {/* Actions */}
       <div className="mt-5 flex gap-2 flex-wrap">
-        {/* Retry — only for failed */}
         {status === "failed" && (
           <button
             onClick={handleRetry}
@@ -220,8 +252,6 @@ export default function CampaignDetail() {
             {retrying ? "Retrying…" : "🔄 Retry Campaign"}
           </button>
         )}
-
-        {/* Delete */}
         {(status === "draft" || status === "failed") && (
           <button
             onClick={handleDelete}
@@ -234,7 +264,7 @@ export default function CampaignDetail() {
         )}
       </div>
 
-      {/* ── POST HISTORY — preserved from original ── */}
+      {/* Post History — preserved from original */}
       <h2 className="mt-7 font-semibold text-gray-800">Post History</h2>
       <div className="mt-2 space-y-2">
         {history.length === 0 && (

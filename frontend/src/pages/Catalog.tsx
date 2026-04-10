@@ -47,22 +47,40 @@ function stripHtml(raw?: string | null): string {
     .trim();
 }
 
-/** Extract a caption string from any shape the AI endpoint returns */
+/**
+ * Extract a caption string from any shape the AI endpoint returns.
+ *
+ * Handles all known response shapes:
+ *   "string"
+ *   { full_caption }
+ *   { caption }
+ *   { data: { full_caption } }         <- backend wraps in { success, data }
+ *   { success: true, data: { ... } }
+ */
 function extractCaption(data: unknown): string {
   if (!data) return "";
   if (typeof data === "string") return data.trim();
+
   if (typeof data === "object" && data !== null) {
     const d = data as Record<string, unknown>;
+
+    // Unwrap { success: true, data: { ... } } envelope first
+    if (d.data && typeof d.data === "object") {
+      const inner = d.data as Record<string, unknown>;
+      const innerCandidate =
+        inner.full_caption ?? inner.caption ?? inner.text ??
+        inner.content ?? inner.result ?? inner.output;
+      if (typeof innerCandidate === "string" && innerCandidate.trim())
+        return innerCandidate.trim();
+    }
+
+    // Top-level fields
     const candidate =
-      d.full_caption ??
-      d.caption ??
-      d.text ??
-      d.content ??
-      d.result ??
-      d.output ??
-      d.message;
-    if (typeof candidate === "string") return candidate.trim();
-    // Try first element of an array
+      d.full_caption ?? d.caption ?? d.text ?? d.content ??
+      d.result ?? d.output ?? d.message;
+    if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+
+    // Array content blocks (Anthropic-style)
     if (Array.isArray(d.content) && d.content.length > 0) {
       const first = d.content[0];
       if (typeof first === "string") return first.trim();
@@ -70,7 +88,8 @@ function extractCaption(data: unknown): string {
         return (first as any).text.trim();
     }
   }
-  // Last resort: JSON stringify so we can at least see what came back
+
+  // Last resort: show raw JSON so developer can see the exact shape
   try { return JSON.stringify(data, null, 2); } catch { return ""; }
 }
 
@@ -281,11 +300,13 @@ function ImportUrlModal({
   return (
     <Modal title="Import from URL" onClose={onClose} wide>
       <p className="text-sm text-gray-500 mb-1">
-        Paste any product listing URL. Supports Shopify, WooCommerce, Phone Place Kenya,
-        Oraimo, Jiji and most standard e-commerce sites.
+        Paste any product listing or product page URL. We'll automatically detect the
+        site structure and import products with their prices and images.
       </p>
       <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-700 mb-4">
-        ⚠ <strong>Jumia</strong> actively blocks scrapers — paste a single product page or use ZIP upload instead.
+        ⚠ Some sites require JavaScript to display products and cannot be scraped directly.
+        If import returns 0 products, try pasting a direct product page URL or use{" "}
+        <strong>Bulk Upload ZIP</strong> instead.
       </div>
 
       <div className="space-y-3 mb-4">

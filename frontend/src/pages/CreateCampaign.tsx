@@ -1,17 +1,13 @@
 /**
  * CreateCampaign.tsx — POSTIKA
- *
- * Multi-product campaign creation:
- * - Select multiple products with click-to-add/remove
- * - Scrollable product preview grid with remove button
- * - AI generate uses product_ids[] (not product_id)
- * - Submit payload uses product_ids[]
- * - Readiness checklist
+ * Multi-product campaign creation with AI editor + partial regeneration.
  */
 
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { listCatalogItems, get, post, type CatalogItem } from "../lib/api";
+import AIResultEditor from "../components/AIResultEditor";
+import { formatPrice, formatPricePsychology } from "../utils/format";
 
 interface Template {
   id: string;
@@ -24,6 +20,14 @@ interface SocialAccount {
   platform?: string;
 }
 
+type AIResult = {
+  hook: string;
+  body: string;
+  cta: string;
+  hashtags: string[];
+  full_caption: string;
+};
+
 function stripHtml(raw?: string | null): string {
   if (!raw) return "";
   return raw
@@ -31,12 +35,6 @@ function stripHtml(raw?: string | null): string {
     .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, " ")
     .replace(/\s{2,}/g, " ").trim();
-}
-
-function formatPrice(item: CatalogItem): string {
-  if (item.price_amount == null) return "";
-  const n = Number(item.price_amount);
-  return isNaN(n) ? "" : `${item.price_currency ?? "KES"} ${n.toLocaleString()}`;
 }
 
 function Spinner() {
@@ -48,7 +46,6 @@ function Spinner() {
   );
 }
 
-// ── Check item ────────────────────────────────────────────────────────────────
 function Check() {
   return (
     <svg className="w-3.5 h-3.5 text-green-500 shrink-0" viewBox="0 0 20 20" fill="currentColor">
@@ -61,29 +58,28 @@ function Circle() {
   return <span className="w-3.5 h-3.5 rounded-full border-2 border-gray-300 inline-block shrink-0" />;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-
 export default function CreateCampaign() {
   const navigate = useNavigate();
 
   // ── Data ──────────────────────────────────────────────────────────────────
-  const [products, setProducts] = useState<CatalogItem[]>([]);
+  const [products,  setProducts]  = useState<CatalogItem[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
-  const [pages, setPages] = useState<SocialAccount[]>([]);
+  const [pages,     setPages]     = useState<SocialAccount[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
-  const [dataError, setDataError] = useState("");
+  const [dataError,   setDataError]   = useState("");
 
   // ── Selections ────────────────────────────────────────────────────────────
-  const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);  // ✅ multi-select
+  const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
   const [templateId, setTemplateId] = useState("");
-  const [pageId, setPageId] = useState("");
+  const [pageId,     setPageId]     = useState("");
 
-  // ── Product search filter ──────────────────────────────────────────────────
+  // ── Product search ────────────────────────────────────────────────────────
   const [productSearch, setProductSearch] = useState("");
 
-  // ── Caption ───────────────────────────────────────────────────────────────
-  const [caption, setCaption] = useState("");
-  const [aiLoading, setAiLoading] = useState(false);
+  // ── AI state ──────────────────────────────────────────────────────────────
+  const [aiResult,    setAiResult]    = useState<AIResult | null>(null);
+  const [finalCaption, setFinalCaption] = useState("");
+  const [aiLoading,   setAiLoading]   = useState(false);
 
   // ── Submit ────────────────────────────────────────────────────────────────
   const [submitting, setSubmitting] = useState(false);
@@ -91,23 +87,24 @@ export default function CreateCampaign() {
   // ── Derived ───────────────────────────────────────────────────────────────
   const selectedProducts = products.filter((p) => selectedProductIds.includes(p.id));
   const selectedTemplate = templates.find((t) => t.id === templateId) ?? null;
-  const selectedPage = pages.find((p) => p.page_id === pageId) ?? null;
+  const selectedPage     = pages.find((p) => p.page_id === pageId) ?? null;
 
   const filteredProducts = products.filter((p) => {
     const q = productSearch.toLowerCase();
-    return (
-      !q ||
-      stripHtml(p.title).toLowerCase().includes(q) ||
-      (p.sku ?? "").toLowerCase().includes(q)
-    );
+    return !q || stripHtml(p.title).toLowerCase().includes(q) || (p.sku ?? "").toLowerCase().includes(q);
   });
 
+  // ✅ Currency-aware price preview for first selected product
+  const previewPrice = selectedProducts[0]
+    ? formatPricePsychology(
+        Number(selectedProducts[0].price_amount),
+        selectedProducts[0].price_currency ?? "KES",
+        "starting"
+      )
+    : "";
+
   const canGenerate = selectedProductIds.length > 0;
-  const canSubmit =
-    selectedProductIds.length > 0 &&
-    !!templateId &&
-    !!pageId &&
-    caption.trim().length > 0;
+  const canSubmit   = selectedProductIds.length > 0 && !!templateId && !!pageId && finalCaption.trim().length > 0;
 
   // ── Load data ──────────────────────────────────────────────────────────────
   useEffect(() => { loadAll(); }, []);
@@ -135,48 +132,72 @@ export default function CreateCampaign() {
     setSelectedProductIds((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
     );
-    setCaption(""); // clear stale caption when selection changes
+    // Clear AI result when selection changes
+    setAiResult(null);
+    setFinalCaption("");
   }
 
   function removeProduct(id: string) {
     setSelectedProductIds((prev) => prev.filter((x) => x !== id));
-    setCaption("");
+    setAiResult(null);
+    setFinalCaption("");
   }
 
-  // ── AI Generate ───────────────────────────────────────────────────────────
+  // ── AI Generate (full) ────────────────────────────────────────────────────
   async function handleGenerateAI() {
     if (!canGenerate) return;
     try {
-      setAiLoading(true); setCaption("");
+      setAiLoading(true);
+      setAiResult(null);
+      setFinalCaption("");
 
-      // ✅ Send product_ids[] — not product_id
-      const payload: Record<string, unknown> = {
-        product_ids: selectedProductIds,
-      };
+      // ✅ product_ids[] — not product_id
+      const payload: Record<string, unknown> = { product_ids: selectedProductIds };
       if (templateId) payload.template_id = templateId;
 
       const data = await post<unknown>("/api/v1/ai/generate", payload);
 
-      // Handle every known response shape
-      let text = "";
-      if (typeof data === "string") text = data;
-      else if (data && typeof data === "object") {
-        const d = data as Record<string, unknown>;
-        text = (
+      // Build AIResult from whatever shape the backend returns.
+      // Backend may wrap as: { success: true, data: { hook, body, cta, ... } }
+      let result: AIResult;
+
+      // Unwrap envelope if present
+      const responseData: unknown =
+        (data && typeof data === "object" && (data as any).data)
+          ? (data as any).data
+          : data;
+
+      if (responseData && typeof responseData === "object") {
+        const d = responseData as Record<string, unknown>;
+
+        const hook        = (d.hook  as string) ?? "";
+        const body        = (d.body  as string) ?? "";
+        const cta         = (d.cta   as string) ?? "";
+        const hashtagsRaw = d.hashtags;
+        const hashtags: string[] = Array.isArray(hashtagsRaw)
+          ? hashtagsRaw.map(String)
+          : typeof hashtagsRaw === "string"
+          ? hashtagsRaw.split(" ").filter(Boolean)
+          : [];
+
+        const full_caption =
           (d.full_caption as string) ??
-          (d.caption as string) ??
-          (d.text as string) ??
-          (d.content as string) ??
-          (d.result as string) ??
-          ""
-        );
+          (d.caption      as string) ??
+          (d.text         as string) ??
+          [hook, body, cta, hashtags.join(" ")].filter(Boolean).join("\n\n") ??
+          "";
+
+        result = { hook, body, cta, hashtags, full_caption };
+      } else if (typeof payload === "string") {
+        result = { hook: "", body: "", cta: "", hashtags: [], full_caption: payload };
+      } else {
+        alert("AI returned an unexpected response. Check the browser console.");
+        console.error("[AI] Unexpected shape:", data);
+        return;
       }
 
-      if (!text.trim()) {
-        alert("AI returned an empty response. Check your template configuration.");
-      } else {
-        setCaption(stripHtml(text));
-      }
+      setAiResult(result);
+      setFinalCaption(result.full_caption);
     } catch (err: any) {
       alert(err?.message || "AI generation failed.");
     } finally {
@@ -190,17 +211,14 @@ export default function CreateCampaign() {
     if (!canSubmit) return;
     try {
       setSubmitting(true);
-
-      // ✅ product_ids[] in payload
       await post("/api/v1/campaigns", {
-        caption: caption.trim(),
-        product_ids: selectedProductIds,                              // ✅ array
-        template_id: templateId,
-        page_ids: [pageId],
-        platforms: [selectedPage?.platform ?? "facebook"],
-        media_urls: selectedProducts.map((p) => p.image_url).filter(Boolean), // ✅ multi-image
+        caption:      finalCaption.trim(),
+        product_ids:  selectedProductIds,
+        template_id:  templateId,
+        page_ids:     [pageId],
+        platforms:    [selectedPage?.platform ?? "facebook"],
+        media_urls:   selectedProducts.map((p) => p.image_url).filter(Boolean),
       });
-
       navigate("/campaigns");
     } catch (err: any) {
       alert(err?.message || "Failed to create campaign.");
@@ -209,10 +227,7 @@ export default function CreateCampaign() {
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // RENDER
-  // ─────────────────────────────────────────────────────────────────────────
-
+  // ── Loading ────────────────────────────────────────────────────────────────
   if (dataLoading) {
     return (
       <div className="p-6 flex items-center gap-3 text-gray-400 text-sm">
@@ -221,6 +236,7 @@ export default function CreateCampaign() {
     );
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
   return (
     <div className="p-4 sm:p-6 max-w-3xl mx-auto">
 
@@ -229,7 +245,7 @@ export default function CreateCampaign() {
         <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-0.5">POSTIKA</p>
         <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Create Campaign</h1>
         <p className="text-sm text-gray-400 mt-1">
-          Select one or more products, pick a template and page, generate your AI caption, then publish.
+          Select products, pick a template and page, generate and refine your AI caption, then publish.
         </p>
       </div>
 
@@ -243,15 +259,14 @@ export default function CreateCampaign() {
 
       <form onSubmit={handleSubmit} className="space-y-6">
 
-        {/* ══════════════════════════════════════════════════════════
-            STEP 1 — PRODUCT SELECTION (multi-select)
-        ══════════════════════════════════════════════════════════ */}
+        {/* ═══════════════════════════════════════════════════
+            STEP 1 — SELECT PRODUCTS (multi)
+        ═══════════════════════════════════════════════════ */}
         <section className="border rounded-2xl overflow-hidden shadow-sm">
           <div className="bg-gray-50 border-b px-4 py-3 flex items-center justify-between">
             <div>
               <h2 className="text-sm font-bold text-gray-800">
-                1. Select Products
-                <span className="text-red-500 ml-0.5">*</span>
+                1. Select Products <span className="text-red-500">*</span>
               </h2>
               <p className="text-xs text-gray-400 mt-0.5">Click to add or remove. Multiple allowed.</p>
             </div>
@@ -262,7 +277,6 @@ export default function CreateCampaign() {
             )}
           </div>
 
-          {/* Search within products */}
           {products.length > 6 && (
             <div className="px-4 pt-3">
               <input
@@ -277,10 +291,10 @@ export default function CreateCampaign() {
 
           {products.length === 0 ? (
             <div className="p-6 text-center text-amber-600 text-sm bg-amber-50">
-              No products in catalog. <a href="/catalog" className="underline font-semibold">Add products first →</a>
+              No products in catalog.{" "}
+              <a href="/catalog" className="underline font-semibold">Add products first →</a>
             </div>
           ) : (
-            /* Scrollable product grid */
             <div className="p-4 max-h-72 overflow-y-auto">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {filteredProducts.map((product) => {
@@ -296,7 +310,6 @@ export default function CreateCampaign() {
                           : "border-gray-200 hover:border-blue-300 hover:bg-gray-50"
                       }`}
                     >
-                      {/* Product image */}
                       {product.image_url ? (
                         <img
                           src={product.image_url}
@@ -305,18 +318,17 @@ export default function CreateCampaign() {
                           onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
                         />
                       ) : (
-                        <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center text-gray-300 text-xs shrink-0">
-                          IMG
-                        </div>
+                        <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center text-gray-300 text-xs shrink-0">IMG</div>
                       )}
-                      {/* Info */}
                       <div className="flex-1 min-w-0">
                         <p className={`text-sm font-semibold truncate ${isSelected ? "text-blue-800" : "text-gray-800"}`}>
                           {stripHtml(product.title)}
                         </p>
-                        <p className="text-xs text-gray-400 mt-0.5">{formatPrice(product)}</p>
+                        {/* ✅ formatPrice with currency */}
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          {formatPrice(Number(product.price_amount), product.price_currency ?? "KES")}
+                        </p>
                       </div>
-                      {/* Selected indicator */}
                       {isSelected && (
                         <div className="w-5 h-5 rounded-full bg-blue-600 flex items-center justify-center shrink-0">
                           <svg className="w-3 h-3 text-white" viewBox="0 0 20 20" fill="currentColor">
@@ -335,14 +347,22 @@ export default function CreateCampaign() {
           )}
         </section>
 
-        {/* ══════════════════════════════════════════════════════════
+        {/* ═══════════════════════════════════════════════════
             SELECTED PRODUCTS PREVIEW GRID
-        ══════════════════════════════════════════════════════════ */}
+        ═══════════════════════════════════════════════════ */}
         {selectedProducts.length > 0 && (
           <section>
             <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">
               Selected Products Preview
             </h2>
+
+            {/* ✅ Currency-aware price psychology preview */}
+            {previewPrice && (
+              <div className="text-sm text-indigo-600 font-medium mb-2">
+                {previewPrice}
+              </div>
+            )}
+
             <div className="flex gap-3 flex-wrap">
               {selectedProducts.map((p) => (
                 <div
@@ -357,15 +377,15 @@ export default function CreateCampaign() {
                       onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
                     />
                   ) : (
-                    <div className="w-28 h-24 bg-gray-100 flex items-center justify-center text-gray-300 text-xs">
-                      No Image
-                    </div>
+                    <div className="w-28 h-24 bg-gray-100 flex items-center justify-center text-gray-300 text-xs">No Image</div>
                   )}
                   <div className="px-2 py-1.5">
                     <p className="text-xs font-semibold text-gray-800 truncate">{stripHtml(p.title)}</p>
-                    <p className="text-xs text-gray-400">{formatPrice(p)}</p>
+                    {/* ✅ formatPrice with currency */}
+                    <p className="text-xs text-gray-400">
+                      {formatPrice(Number(p.price_amount), p.price_currency ?? "KES")}
+                    </p>
                   </div>
-                  {/* Remove button */}
                   <button
                     type="button"
                     onClick={() => removeProduct(p.id)}
@@ -380,9 +400,9 @@ export default function CreateCampaign() {
           </section>
         )}
 
-        {/* ══════════════════════════════════════════════════════════
+        {/* ═══════════════════════════════════════════════════
             STEP 2 — TEMPLATE
-        ══════════════════════════════════════════════════════════ */}
+        ═══════════════════════════════════════════════════ */}
         <section>
           <label className="block text-sm font-bold text-gray-800 mb-1">
             2. Template <span className="text-red-500">*</span>
@@ -394,13 +414,11 @@ export default function CreateCampaign() {
           ) : (
             <select
               value={templateId}
-              onChange={(e) => { setTemplateId(e.target.value); setCaption(""); }}
+              onChange={(e) => { setTemplateId(e.target.value); setAiResult(null); setFinalCaption(""); }}
               className="w-full border rounded-xl p-3 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="">— Select a template —</option>
-              {templates.map((t) => (
-                <option key={t.id} value={t.id}>{t.name}</option>
-              ))}
+              {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
           )}
           {selectedTemplate && (
@@ -410,9 +428,9 @@ export default function CreateCampaign() {
           )}
         </section>
 
-        {/* ══════════════════════════════════════════════════════════
-            STEP 3 — PAGE / SOCIAL ACCOUNT
-        ══════════════════════════════════════════════════════════ */}
+        {/* ═══════════════════════════════════════════════════
+            STEP 3 — PAGE
+        ═══════════════════════════════════════════════════ */}
         <section>
           <label className="block text-sm font-bold text-gray-800 mb-1">
             3. Page / Social Account <span className="text-red-500">*</span>
@@ -443,83 +461,97 @@ export default function CreateCampaign() {
           )}
         </section>
 
-        {/* ══════════════════════════════════════════════════════════
-            STEP 4 — AI CAPTION
-        ══════════════════════════════════════════════════════════ */}
+        {/* ═══════════════════════════════════════════════════
+            STEP 4 — AI CAPTION GENERATION + EDITOR
+        ═══════════════════════════════════════════════════ */}
         <section>
           <label className="block text-sm font-bold text-gray-800 mb-1">
-            4. Caption <span className="text-red-500">*</span>
+            4. AI Caption <span className="text-red-500">*</span>
           </label>
 
-          <button
-            type="button"
-            onClick={handleGenerateAI}
-            disabled={aiLoading || !canGenerate}
-            className="w-full mb-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 disabled:cursor-not-allowed text-white px-4 py-3 rounded-xl text-sm font-bold transition flex items-center justify-center gap-2"
-          >
-            {aiLoading ? <><Spinner /> Generating caption…</> : <>✨ Generate with AI{selectedProductIds.length > 1 ? ` (${selectedProductIds.length} products)` : ""}</>}
-          </button>
+          {/* Generate + Reset buttons */}
+          <div className="flex gap-2 mb-3">
+            <button
+              type="button"
+              onClick={handleGenerateAI}
+              disabled={aiLoading || !canGenerate}
+              className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 disabled:cursor-not-allowed text-white px-4 py-3 rounded-xl text-sm font-bold transition flex items-center justify-center gap-2"
+            >
+              {aiLoading
+                ? <><Spinner /> Generating…</>
+                : <>✨ Generate with AI{selectedProductIds.length > 1 ? ` (${selectedProductIds.length} products)` : ""}</>}
+            </button>
+
+            {aiResult && (
+              <button
+                type="button"
+                onClick={() => { setAiResult(null); setFinalCaption(""); }}
+                className="px-4 py-3 rounded-xl border text-sm text-gray-600 hover:bg-gray-100 transition font-semibold"
+              >
+                Reset
+              </button>
+            )}
+          </div>
 
           {!canGenerate && (
             <p className="text-xs text-gray-400 mb-2">Select at least one product to enable AI generation.</p>
           )}
 
-          <textarea
-            placeholder={
-              aiLoading
-                ? "Generating…"
-                : "AI caption will appear here. You can also type or edit manually."
-            }
-            value={caption}
-            onChange={(e) => setCaption(e.target.value)}
-            rows={6}
-            disabled={aiLoading}
-            className="w-full border rounded-xl p-4 text-sm resize-y focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-400 leading-relaxed"
-          />
-          <p className="text-xs text-gray-400 mt-1.5">
-            Edit the generated caption freely before submitting.
-          </p>
+          {/* ✅ AI Editor — structured hook/body/cta with per-section regenerate */}
+          {aiResult ? (
+            <AIResultEditor
+              result={aiResult}
+              productId={selectedProductIds[0]}
+              productIds={selectedProductIds}
+              onChange={(updated) => {
+                setAiResult(updated);
+                setFinalCaption(updated.full_caption);
+              }}
+            />
+          ) : (
+            /* Fallback plain textarea when no AI result yet */
+            <textarea
+              placeholder="AI caption will appear here after generation. You can also type manually."
+              value={finalCaption}
+              onChange={(e) => setFinalCaption(e.target.value)}
+              rows={6}
+              className="w-full border rounded-xl p-4 text-sm resize-y focus:outline-none focus:ring-2 focus:ring-blue-500 leading-relaxed"
+            />
+          )}
         </section>
 
-        {/* ══════════════════════════════════════════════════════════
+        {/* ═══════════════════════════════════════════════════
             READINESS CHECKLIST
-        ══════════════════════════════════════════════════════════ */}
+        ═══════════════════════════════════════════════════ */}
         <section className="bg-gray-50 border rounded-2xl p-4">
-          <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">
-            Ready to publish?
-          </p>
+          <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">Ready to publish?</p>
           <div className="space-y-2">
-            <div className="flex items-center gap-2 text-xs">
-              {selectedProductIds.length > 0 ? <Check /> : <Circle />}
-              <span className={selectedProductIds.length > 0 ? "text-green-700 font-medium" : "text-gray-400"}>
-                Products selected
-                {selectedProductIds.length > 0 ? ` — ${selectedProductIds.length} product${selectedProductIds.length > 1 ? "s" : ""}` : ""}
-              </span>
-            </div>
-            <div className="flex items-center gap-2 text-xs">
-              {templateId ? <Check /> : <Circle />}
-              <span className={templateId ? "text-green-700 font-medium" : "text-gray-400"}>
-                Template{selectedTemplate ? ` — ${selectedTemplate.name}` : ""}
-              </span>
-            </div>
-            <div className="flex items-center gap-2 text-xs">
-              {pageId ? <Check /> : <Circle />}
-              <span className={pageId ? "text-green-700 font-medium" : "text-gray-400"}>
-                Page{selectedPage ? ` — ${selectedPage.page_name || selectedPage.page_id}` : ""}
-              </span>
-            </div>
-            <div className="flex items-center gap-2 text-xs">
-              {caption.trim() ? <Check /> : <Circle />}
-              <span className={caption.trim() ? "text-green-700 font-medium" : "text-gray-400"}>
-                Caption ready
-              </span>
-            </div>
+            {[
+              {
+                done: selectedProductIds.length > 0,
+                label: `Products${selectedProductIds.length > 0 ? ` — ${selectedProductIds.length} selected` : ""}`,
+              },
+              {
+                done: !!templateId,
+                label: `Template${selectedTemplate ? ` — ${selectedTemplate.name}` : ""}`,
+              },
+              {
+                done: !!pageId,
+                label: `Page${selectedPage ? ` — ${selectedPage.page_name || selectedPage.page_id}` : ""}`,
+              },
+              { done: finalCaption.trim().length > 0, label: "Caption ready" },
+            ].map(({ done, label }) => (
+              <div key={label} className="flex items-center gap-2 text-xs">
+                {done ? <Check /> : <Circle />}
+                <span className={done ? "text-green-700 font-medium" : "text-gray-400"}>{label}</span>
+              </div>
+            ))}
           </div>
         </section>
 
-        {/* ══════════════════════════════════════════════════════════
+        {/* ═══════════════════════════════════════════════════
             SUBMIT
-        ══════════════════════════════════════════════════════════ */}
+        ═══════════════════════════════════════════════════ */}
         <button
           type="submit"
           disabled={submitting || !canSubmit}
