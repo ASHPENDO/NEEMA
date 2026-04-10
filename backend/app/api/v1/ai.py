@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
-from typing import Optional, Any, Dict
+from typing import Optional, Any, Dict, List
 
 from app.db.session import get_db
 from app.services.ai_content_service import AIContentService
@@ -10,11 +10,18 @@ router = APIRouter(prefix="/ai", tags=["AI"])
 
 
 # ==============================
-# REQUEST SCHEMA
+# REQUEST SCHEMAS
 # ==============================
 class AIGenerateRequest(BaseModel):
     product_id: str = Field(..., description="Product ID")
     template_id: Optional[str] = Field(None, description="Optional template ID")
+
+
+class RegenerateRequest(BaseModel):
+    product_id: Optional[str] = None
+    product_ids: Optional[List[str]] = None
+    section: str  # "hook" | "body" | "cta"
+    context: Dict[str, Any]
 
 
 # ==============================
@@ -28,7 +35,7 @@ def normalize_ai_response(result: Any) -> Dict[str, Any]:
     - Old string format (backward compatibility)
     """
 
-    # ✅ Already structured (new system)
+    # ✅ Already structured
     if isinstance(result, dict):
         return {
             "hook": result.get("hook", ""),
@@ -39,7 +46,7 @@ def normalize_ai_response(result: Any) -> Dict[str, Any]:
             or f"{result.get('hook', '')}\n\n{result.get('body', '')}\n\n{result.get('cta', '')}".strip(),
         }
 
-    # ⚠️ Old string fallback (non-breaking)
+    # ⚠️ Old string fallback
     if isinstance(result, str):
         return {
             "hook": "",
@@ -49,12 +56,12 @@ def normalize_ai_response(result: Any) -> Dict[str, Any]:
             "full_caption": result,
         }
 
-    # ❌ Unexpected format
+    # ❌ Unexpected
     raise ValueError("Invalid AI response format")
 
 
 # ==============================
-# ENDPOINT (UPGRADED, NON-BREAKING)
+# GENERATE FULL AI CONTENT
 # ==============================
 @router.post("/generate")
 async def generate_ai_content(
@@ -62,23 +69,14 @@ async def generate_ai_content(
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        # ==============================
-        # CALL AI SERVICE
-        # ==============================
         raw_result = await AIContentService.generate(
             db=db,
             product_id=payload.product_id,
             template_id=payload.template_id,
         )
 
-        # ==============================
-        # NORMALIZE OUTPUT
-        # ==============================
         result = normalize_ai_response(raw_result)
 
-        # ==============================
-        # FINAL SAFETY (GUARANTEE CAPTION)
-        # ==============================
         if not result.get("full_caption"):
             raise ValueError("AI failed to generate caption")
 
@@ -91,6 +89,41 @@ async def generate_ai_content(
         raise HTTPException(status_code=400, detail=str(e))
 
     except Exception as e:
-        # Optional: log full error server-side
         print(f"[AI ENDPOINT ERROR] {str(e)}")
         raise HTTPException(status_code=500, detail="AI generation failed")
+
+
+# ==============================
+# 🔥 PARTIAL REGENERATION (NEW)
+# ==============================
+@router.post("/regenerate")
+async def regenerate_section(
+    payload: RegenerateRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        # Validate section
+        if payload.section not in {"hook", "body", "cta"}:
+            raise ValueError("Invalid section. Must be 'hook', 'body', or 'cta'.")
+
+        raw_result = await AIContentService.generate(
+            db=db,
+            product_id=payload.product_id,
+            product_ids=payload.product_ids,
+        )
+
+        result = normalize_ai_response(raw_result)
+
+        return {
+            "success": True,
+            "data": {
+                payload.section: result.get(payload.section, "")
+            }
+        }
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    except Exception as e:
+        print(f"[AI REGENERATE ERROR] {str(e)}")
+        raise HTTPException(status_code=500, detail="AI regeneration failed")

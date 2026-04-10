@@ -33,9 +33,6 @@ router = APIRouter(prefix="/catalog/items", tags=["catalog"])
 
 # ------------------------------------------------------------------
 # Alias router: GET /catalog/ — lightweight tenant-scoped list
-# (safe duplicate of the /catalog/items GET, for callers that hit
-#  the shorter path; uses the same auth pattern as the rest of this
-#  module so no new dependencies are introduced)
 # ------------------------------------------------------------------
 
 catalog_alias_router = APIRouter(prefix="/catalog", tags=["catalog"])
@@ -62,17 +59,70 @@ async def list_catalog_items_alias(
 # Helpers
 # ------------------------------------------------------------------
 
-_PRICE_RE = re.compile(r"(KSh|KES|Sh)\s*([0-9][0-9,\.]*)", flags=re.IGNORECASE)
+_PRICE_RE = re.compile(r"(KSh|KES|Sh|UGX|TZS|TSh)\s*([0-9][0-9,\.]*)", flags=re.IGNORECASE)
 _TAG_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"\s+")
 
-# A few realistic UA strings. Keep small + stable.
+# Expanded, realistic UA pool — rotated per request to reduce fingerprinting
 _UA_POOL = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3 Safari/605.1.15",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4.1 Safari/605.1.15",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.6367.82 Mobile Safari/537.36",
 ]
+
+# Accept-Language variants to rotate
+_ACCEPT_LANG_POOL = [
+    "en-US,en;q=0.9,sw;q=0.8",
+    "en-GB,en;q=0.9",
+    "en-US,en;q=0.8",
+    "en-KE,en;q=0.9,sw-KE;q=0.8",
+]
+
+# ------------------------------------------------------------------
+# ✅ normalize_currency — maps raw scraped currency strings to ISO codes
+# ------------------------------------------------------------------
+
+def normalize_currency(value: Optional[str]) -> str:
+    """
+    Normalize raw currency strings from scraped data to standard ISO codes.
+    Falls back to "KES" for any unknown or missing value.
+
+    Examples:
+        "KSh" → "KES"
+        "ugsh" → "UGX"
+        "TSh" → "TZS"
+        None  → "KES"
+    """
+    if not value:
+        return "KES"
+    value = value.upper().strip()
+    mapping: Dict[str, str] = {
+        # Kenyan Shilling variants
+        "KES":  "KES",
+        "KSH":  "KES",
+        "SH":   "KES",
+        "K":    "KES",
+        # Ugandan Shilling variants
+        "UGX":  "UGX",
+        "UGSH": "UGX",
+        "USH":  "UGX",
+        # Tanzanian Shilling variants
+        "TZS":  "TZS",
+        "TSH":  "TZS",
+        "TSZ":  "TZS",
+        # USD kept as-is
+        "USD":  "USD",
+        "US$":  "USD",
+        "$":    "USD",
+    }
+    return mapping.get(value, "KES")
 
 
 def _clean_scraped_text(value: Any) -> Optional[str]:
@@ -82,8 +132,16 @@ def _clean_scraped_text(value: Any) -> Optional[str]:
         value = str(value)
 
     text = html.unescape(value)
+    # ✅ Strip ALL HTML tags — eliminates class="header-search-title"> style pollution
     text = _TAG_RE.sub(" ", text)
     text = _WS_RE.sub(" ", text).strip()
+
+    # ✅ Secondary pass: strip any residual attribute fragments that survived
+    # e.g. '0" class="something">Recent Searches' after partial tag stripping
+    text = re.sub(r'\d*"\s*class="[^"]*"[^>]*>', "", text)
+    text = re.sub(r"^\s*\d+\"\s*", "", text)  # leading orphaned attribute values
+    text = _WS_RE.sub(" ", text).strip()
+
     return text or None
 
 
@@ -115,18 +173,43 @@ def _site_root(url: str) -> str:
 
 
 def _browser_like_headers(target_url: str) -> Dict[str, str]:
+    """
+    Generate randomised, realistic browser headers per request.
+    Rotating UA + Accept-Language reduces bot-detection fingerprinting.
+    """
     root = _site_root(target_url)
     ua = random.choice(_UA_POOL)
+    lang = random.choice(_ACCEPT_LANG_POOL)
 
-    return {
+    # Vary sec-ch-ua based on whether UA is Chrome-like
+    sec_ch_ua = (
+        '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"'
+        if "Chrome" in ua
+        else ""
+    )
+
+    headers: Dict[str, str] = {
         "User-Agent": ua,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9,sw;q=0.8",
+        "Accept-Language": lang,
+        "Accept-Encoding": "gzip, deflate, br",
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
         "Upgrade-Insecure-Requests": "1",
         "Referer": root + "/",
+        "DNT": "1",
+        "Connection": "keep-alive",
     }
+    if sec_ch_ua:
+        headers["sec-ch-ua"] = sec_ch_ua
+        headers["sec-ch-ua-mobile"] = "?0"
+        headers["sec-ch-ua-platform"] = '"Windows"'
+        headers["Sec-Fetch-Dest"] = "document"
+        headers["Sec-Fetch-Mode"] = "navigate"
+        headers["Sec-Fetch-Site"] = "same-origin"
+        headers["Sec-Fetch-User"] = "?1"
+
+    return headers
 
 
 def _extract_jsonld_blocks(html_text: str) -> List[Any]:
@@ -253,8 +336,8 @@ def _extract_product_fields(
     else:
         image_url = None
 
-    if isinstance(price_currency, str):
-        price_currency = price_currency.strip()
+    # ✅ Normalize currency through the canonical mapping
+    price_currency = normalize_currency(price_currency)
 
     return title, description, sku, image_url, price_amount, price_currency
 
@@ -318,8 +401,16 @@ def _extract_product_links(base_url: str, html_text: str, limit: int) -> List[st
         is_shopify = "/products/" in path
         is_woo = "/product/" in path or "product=" in q
         is_homelink = "/catalogue/" in path and "/catalogue/category/" not in path
+        # ✅ Additional patterns for more site types
+        is_generic_product = (
+            "/item/" in path
+            or "/p/" in path
+            or "/listing/" in path
+            or "/shop/" in path
+            or re.search(r"/[a-z0-9\-]+-p\d+", path) is not None
+        )
 
-        if is_shopify or is_woo or is_homelink:
+        if is_shopify or is_woo or is_homelink or is_generic_product:
             candidates.append(abs_url)
 
     seen: Set[str] = set()
@@ -364,17 +455,206 @@ def _extract_js_redirect_url(html_text: str) -> Optional[str]:
     return None
 
 
-async def _fetch_soft(client: httpx.AsyncClient, url: str, *, max_retries: int = 3) -> Tuple[int, str]:
+# ------------------------------------------------------------------
+# ✅ CSS/XPath-style structural extraction helpers
+# These provide a fallback when JSON-LD is absent — mimics what
+# a browser automation tool (Playwright/Selenium) would select.
+# ------------------------------------------------------------------
+
+def _css_extract_title(html_text: str) -> Optional[str]:
+    """
+    Try common e-commerce title selectors in priority order.
+    Mirrors: h1.product-title, h1.entry-title, [itemprop=name], h1
+    """
+    patterns = [
+        # WooCommerce / generic
+        r'<h1[^>]+class="[^"]*product[_\-]title[^"]*"[^>]*>(.*?)</h1>',
+        r'<h1[^>]+class="[^"]*entry[_\-]title[^"]*"[^>]*>(.*?)</h1>',
+        # Microdata
+        r'<[^>]+itemprop=["\']name["\'][^>]*>(.*?)</',
+        # Generic h1
+        r'<h1[^>]*>(.*?)</h1>',
+        # title tag fallback
+        r'<title[^>]*>(.*?)</title>',
+    ]
+    for pat in patterns:
+        m = re.search(pat, html_text, flags=re.IGNORECASE | re.DOTALL)
+        if m:
+            val = _clean_scraped_text(m.group(1))
+            if val and len(val) < 300:
+                return val
+    return None
+
+
+def _css_extract_price(html_text: str) -> Tuple[Optional[Decimal], Optional[str]]:
+    """
+    Try common e-commerce price selectors. Returns (amount, currency).
+    Mirrors: .price, .woocommerce-Price-amount, [itemprop=price]
+    """
+    # itemprop=price — most reliable
+    m = re.search(
+        r'<[^>]+itemprop=["\']price["\'][^>]*(?:content=["\']([\d\.]+)["\']|>(.*?)<)',
+        html_text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if m:
+        raw = (m.group(1) or m.group(2) or "").strip()
+        val = _coerce_decimal(raw)
+        if val and val > 0:
+            # Try to find currency nearby
+            currency_m = re.search(
+                r'itemprop=["\']priceCurrency["\'][^>]*content=["\']([A-Z]{3})["\']',
+                html_text,
+                flags=re.IGNORECASE,
+            )
+            currency = normalize_currency(currency_m.group(1) if currency_m else None)
+            return val, currency
+
+    # WooCommerce price span
+    woo_m = re.search(
+        r'<span[^>]+class="[^"]*woocommerce-Price-amount[^"]*"[^>]*>(.*?)</span>',
+        html_text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if woo_m:
+        raw = _strip_tags(woo_m.group(1))
+        # Extract currency symbol
+        cur_sym = re.search(r'(KES|KSh|UGX|TZS|TSh|\$)', raw, re.IGNORECASE)
+        currency = normalize_currency(cur_sym.group(1) if cur_sym else None)
+        amount = _coerce_decimal(re.sub(r"[^\d.]", "", raw))
+        if amount and amount > 0:
+            return amount, currency
+
+    # Generic .price class
+    price_m = re.search(
+        r'<[^>]+class="[^"]*\bprice\b[^"]*"[^>]*>(.*?)</(?:span|div|p|bdi)>',
+        html_text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if price_m:
+        raw = _strip_tags(price_m.group(1))
+        cur_sym = re.search(r'(KES|KSh|UGX|TZS|TSh|\$)', raw, re.IGNORECASE)
+        currency = normalize_currency(cur_sym.group(1) if cur_sym else None)
+        amount = _coerce_decimal(re.sub(r"[^\d.]", "", raw))
+        if amount and amount > 0:
+            return amount, currency
+
+    # Raw price regex across full page (last resort)
+    m2 = _PRICE_RE.search(html_text)
+    if m2:
+        currency = normalize_currency(m2.group(1))
+        amount = _coerce_decimal(m2.group(2))
+        if amount and amount > 0:
+            return amount, currency
+
+    return None, None
+
+
+def _css_extract_description(html_text: str) -> Optional[str]:
+    """
+    Try common product description selectors.
+    Mirrors: [itemprop=description], .woocommerce-product-details__short-description, .product-description
+    """
+    patterns = [
+        r'<[^>]+itemprop=["\']description["\'][^>]*>(.*?)</(?:div|p|span|section)>',
+        r'<div[^>]+class="[^"]*short[_\-]description[^"]*"[^>]*>(.*?)</div>',
+        r'<div[^>]+class="[^"]*product[_\-]description[^"]*"[^>]*>(.*?)</div>',
+        r'<div[^>]+class="[^"]*entry[_\-]summary[^"]*"[^>]*>(.*?)</div>',
+    ]
+    for pat in patterns:
+        m = re.search(pat, html_text, flags=re.IGNORECASE | re.DOTALL)
+        if m:
+            val = _clean_scraped_text(m.group(1))
+            if val and len(val) >= 20:
+                return val
+    return None
+
+
+def _css_extract_image(html_text: str) -> Optional[str]:
+    """
+    Try common product image selectors.
+    Mirrors: [itemprop=image], .woocommerce-product-gallery img, og:image
+    """
+    # itemprop=image
+    m = re.search(
+        r'<[^>]+itemprop=["\']image["\'][^>]*(?:src|content)=["\']([^"\']+)["\']',
+        html_text,
+        flags=re.IGNORECASE,
+    )
+    if m:
+        url = m.group(1).strip()
+        if url and url.startswith("http"):
+            return url
+
+    # WooCommerce gallery
+    m2 = re.search(
+        r'<div[^>]+class="[^"]*woocommerce-product-gallery[^"]*"[^>]*>.*?<img[^>]+src=["\']([^"\']+)["\']',
+        html_text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if m2:
+        url = m2.group(1).strip()
+        if url and url.startswith("http"):
+            return url
+
+    # og:image fallback
+    _, _, og_image = _extract_og_fallback(html_text)
+    return og_image
+
+
+def _css_extract_sku(html_text: str) -> Optional[str]:
+    """Extract SKU from common markup patterns."""
+    patterns = [
+        r'<[^>]+itemprop=["\']sku["\'][^>]*content=["\']([^"\']+)["\']',
+        r'<[^>]+itemprop=["\']sku["\'][^>]*>(.*?)</',
+        r'\bSKU\b[:\s]*([A-Za-z0-9\-_]+)',
+        r'\bMPN\b[:\s]*([A-Za-z0-9\-_]+)',
+    ]
+    for pat in patterns:
+        m = re.search(pat, html_text, flags=re.IGNORECASE | re.DOTALL)
+        if m:
+            val = _clean_scraped_text(m.group(1))
+            if val and len(val) < 100:
+                return val
+    return None
+
+
+async def _fetch_soft(
+    client: httpx.AsyncClient,
+    url: str,
+    *,
+    max_retries: int = 3,
+) -> Tuple[int, str]:
+    """
+    Fetch a URL with realistic browser headers, retry on 429/403,
+    and follow meta-refresh / JS redirects.
+
+    Adaptive strategy:
+    - Attempt 1: standard headers
+    - Attempt 2: different UA + slight delay
+    - Attempt 3: mobile UA + longer delay
+    If still blocked: return the last status/body so callers can decide.
+    """
     last_status = 0
     last_text = ""
 
     for attempt in range(max_retries):
         headers = _browser_like_headers(url)
 
+        # On retries, force a different UA bucket
+        if attempt == 1:
+            mobile_ua = next(
+                (u for u in _UA_POOL if "Mobile" in u or "iPhone" in u), _UA_POOL[-1]
+            )
+            headers["User-Agent"] = mobile_ua
+
         try:
             r = await client.get(url, headers=headers)
         except httpx.RequestError as e:
-            raise HTTPException(status_code=502, detail=f"Failed to fetch URL (network/DNS error): {str(e)}")
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to fetch URL (network/DNS error): {str(e)}",
+            )
 
         last_status = r.status_code
         last_text = r.text or ""
@@ -385,11 +665,15 @@ async def _fetch_soft(client: httpx.AsyncClient, url: str, *, max_retries: int =
             next_u = meta_u or js_u
             if next_u:
                 next_abs = urljoin(url, next_u)
-                r2 = await client.get(next_abs, headers=_browser_like_headers(next_abs))
+                r2 = await client.get(
+                    next_abs, headers=_browser_like_headers(next_abs)
+                )
                 return r2.status_code, (r2.text or "")
 
         if last_status in (429, 403):
-            await asyncio.sleep((0.6 * (attempt + 1)) + random.random() * 0.6)
+            # Exponential back-off with jitter
+            wait = (1.2 ** (attempt + 1)) + random.uniform(0.5, 1.5)
+            await asyncio.sleep(wait)
             continue
 
         return last_status, last_text
@@ -412,7 +696,9 @@ def _parse_price_from_text(text: str) -> Optional[Decimal]:
     return _coerce_decimal(m.group(2))
 
 
-def _parse_homelink_list_page(html_text: str, base_url: str, limit: int) -> List[Dict[str, Any]]:
+def _parse_homelink_list_page(
+    html_text: str, base_url: str, limit: int
+) -> List[Dict[str, Any]]:
     anchors = re.findall(
         r'<a[^>]+href=["\']([^"\']+)["\'][^>]*>(.*?)</a>',
         html_text,
@@ -450,8 +736,8 @@ def _parse_homelink_list_page(html_text: str, base_url: str, limit: int) -> List
         title = re.sub(r"\bView product\b", "", title, flags=re.IGNORECASE)
         title = re.sub(r"\+\s*Compare\b", "", title, flags=re.IGNORECASE)
         title = re.sub(r"\s+", " ", title).strip()
-
         title = _clean_scraped_text(title)
+
         if not title or len(title) > 255:
             continue
 
@@ -478,39 +764,49 @@ def _parse_homelink_list_page(html_text: str, base_url: str, limit: int) -> List
 def _parse_product_page_fallback(
     html_text: str,
 ) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str], Optional[Decimal]]:
-    h1 = re.search(r"<h1[^>]*>(.*?)</h1>", html_text, flags=re.IGNORECASE | re.DOTALL)
-    title = _strip_tags(h1.group(1)) if h1 else None
+    """
+    ✅ Enhanced fallback using CSS/XPath-style structural selectors
+    before falling back to raw regex. Eliminates HTML tag pollution
+    in titles and descriptions.
+    """
+    # ✅ Use structured CSS-selector extraction first
+    title = _css_extract_title(html_text)
+    description = _css_extract_description(html_text)
+    sku = _css_extract_sku(html_text)
+    image_url = _css_extract_image(html_text)
+    price_amount, _ = _css_extract_price(html_text)
 
-    og_title, og_desc, og_image = _extract_og_fallback(html_text)
-    if not title:
-        title = og_title
+    # Legacy OG fallback if structured extraction failed
+    if not title or not image_url:
+        og_title, og_desc, og_image = _extract_og_fallback(html_text)
+        if not title:
+            title = og_title
+        if not description:
+            description = og_desc
+        if not image_url:
+            image_url = og_image
 
-    sku = None
-    msku = re.search(r"\bSKU\b[:\s]*([A-Za-z0-9\-_]+)", html_text, flags=re.IGNORECASE)
-    if msku:
-        sku = _clean_scraped_text(msku.group(1).strip())
-
-    price_amount = None
-    mprice = _PRICE_RE.search(html_text)
-    if mprice:
-        price_amount = _coerce_decimal(mprice.group(2))
-
-    desc = og_desc
-    if not desc:
-        ps = re.findall(r"<p[^>]*>(.*?)</p>", html_text, flags=re.IGNORECASE | re.DOTALL)
+    # Last-resort paragraph scan for description
+    if not description:
+        ps = re.findall(
+            r"<p[^>]*>(.*?)</p>", html_text, flags=re.IGNORECASE | re.DOTALL
+        )
         for p in ps[:10]:
             t = _strip_tags(p)
             if len(t) >= 60:
-                desc = t
+                description = t
                 break
 
+    # Ensure all text fields are clean
     title = _clean_scraped_text(title)
-    desc = _clean_scraped_text(desc)
+    description = _clean_scraped_text(description)
 
-    return title, desc, sku, og_image, price_amount
+    return title, description, sku, image_url, price_amount
 
 
-async def _try_woocommerce_store_api(client: httpx.AsyncClient, root: str, max_items: int) -> List[Dict[str, Any]]:
+async def _try_woocommerce_store_api(
+    client: httpx.AsyncClient, root: str, max_items: int
+) -> List[Dict[str, Any]]:
     url = f"{root}/wp-json/wc/store/v1/products?per_page={min(max_items, 100)}"
     r = await client.get(url, headers={"Accept": "application/json"})
     if r.status_code != 200:
@@ -531,7 +827,7 @@ async def _try_woocommerce_store_api(client: httpx.AsyncClient, root: str, max_i
             continue
 
         prices = item.get("prices") if isinstance(item.get("prices"), dict) else {}
-        currency = prices.get("currency_code") if isinstance(prices.get("currency_code"), str) else None
+        currency_raw = prices.get("currency_code") if isinstance(prices.get("currency_code"), str) else None
 
         price_raw = prices.get("price")
         if price_raw is None:
@@ -540,6 +836,9 @@ async def _try_woocommerce_store_api(client: httpx.AsyncClient, root: str, max_i
         price_amount = _coerce_decimal(price_raw)
         if price_amount is None or price_amount <= 0:
             continue
+
+        # ✅ Normalize WooCommerce currency
+        currency = normalize_currency(currency_raw)
 
         image_url = None
         images = item.get("images")
@@ -553,11 +852,13 @@ async def _try_woocommerce_store_api(client: httpx.AsyncClient, root: str, max_i
         out.append(
             {
                 "name": name,
-                "description": _clean_scraped_text(item.get("short_description") or item.get("description")),
+                "description": _clean_scraped_text(
+                    item.get("short_description") or item.get("description")
+                ),
                 "sku": _clean_scraped_text(item.get("sku")),
                 "image_url": image_url,
                 "price_amount": price_amount,
-                "price_currency": (currency or "KES"),
+                "price_currency": currency,
             }
         )
         if len(out) >= max_items:
@@ -565,7 +866,9 @@ async def _try_woocommerce_store_api(client: httpx.AsyncClient, root: str, max_i
     return out
 
 
-async def _try_shopify_product_json(client: httpx.AsyncClient, product_url: str) -> Optional[Dict[str, Any]]:
+async def _try_shopify_product_json(
+    client: httpx.AsyncClient, product_url: str
+) -> Optional[Dict[str, Any]]:
     p = urlparse(product_url)
     if "/products/" not in (p.path or ""):
         return None
@@ -621,7 +924,7 @@ async def _try_shopify_product_json(client: httpx.AsyncClient, product_url: str)
         "sku": sku,
         "image_url": image_url,
         "price_amount": price_amount,
-        "price_currency": "KES",
+        "price_currency": "KES",  # Shopify stores normalized on ingest
     }
 
 
@@ -662,12 +965,22 @@ def _ingest_products_dicts(
     for prod in product_dicts:
         if len(created) >= max_items:
             break
+
         title, description, sku, image_url, price_amount, price_currency = _extract_product_fields(prod)
+
+        # ✅ normalize_currency applied here — covers every ingestion path
+        # _extract_product_fields already calls normalize_currency internally,
+        # but we re-apply here as a safety net in case price_currency is still
+        # an empty string or a non-normalised raw value from a custom dict.
         if not price_currency:
-            price_currency = default_currency
+            price_currency = normalize_currency(default_currency)
+        else:
+            price_currency = normalize_currency(price_currency)
+
         if not title or not price_amount or price_amount <= 0:
             skipped += 1
             continue
+
         item = _make_item(
             membership=membership,
             title=title,
@@ -716,7 +1029,8 @@ async def create_catalog_item(
         sku=payload.sku,
         image_url=payload.image_url,
         price_amount=payload.price_amount,
-        price_currency=payload.price_currency,
+        # ✅ Normalize currency on manual create too
+        price_currency=normalize_currency(payload.price_currency),
     )
     db.add(item)
     await db.commit()
@@ -759,7 +1073,13 @@ async def update_catalog_item(
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
 
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    update_data = payload.model_dump(exclude_unset=True)
+
+    # ✅ Normalize currency if it's being updated
+    if "price_currency" in update_data and update_data["price_currency"]:
+        update_data["price_currency"] = normalize_currency(update_data["price_currency"])
+
+    for field, value in update_data.items():
         setattr(item, field, value)
 
     await db.commit()
@@ -789,7 +1109,24 @@ async def delete_catalog_item(
 
 
 # ------------------------------------------------------------------
-# Scrape ingestion (server fetch) - Option B ("softer" fetching)
+# Scrape ingestion — adaptive, multi-strategy
+#
+# Strategy order:
+#   1. WooCommerce Store API (fastest, cleanest)
+#   2. JSON-LD structured data from listing page
+#   3. Homelink catalogue list pattern
+#   4. Product page crawling:
+#      a. JSON-LD on product page
+#      b. Shopify .js endpoint
+#      c. CSS/XPath structural fallback  ← _parse_product_page_fallback
+#      d. OG meta fallback
+#
+# Browser automation note:
+#   Sites that require full JS execution (heavy AJAX/SPA — e.g. Jumia)
+#   cannot be reliably scraped with httpx alone. For those, deploy a
+#   Playwright or Selenium worker alongside this API and proxy the
+#   rendered HTML to this endpoint. The scraping logic here will work
+#   correctly on the rendered HTML output from such a worker.
 # ------------------------------------------------------------------
 
 @router.post("/scrape", response_model=CatalogScrapeResponse, status_code=status.HTTP_201_CREATED)
@@ -809,18 +1146,25 @@ async def scrape_catalog_items(
     mode_used = "unknown"
 
     async with httpx.AsyncClient(
-        timeout=httpx.Timeout(25.0, connect=10.0),
+        timeout=httpx.Timeout(30.0, connect=12.0),
         follow_redirects=True,
         http2=True,
     ) as client:
+
+        # ── Strategy 1: WooCommerce Store API ─────────────────────────────
         if payload.try_woocommerce_store_api:
             try:
-                api_products = await _try_woocommerce_store_api(client, root, max_items=payload.max_items)
+                api_products = await _try_woocommerce_store_api(
+                    client, root, max_items=payload.max_items
+                )
                 if api_products:
                     for p in api_products[: payload.max_items]:
                         title = _clean_scraped_text(p.get("name"))
                         price_amount = _coerce_decimal(p.get("price_amount"))
-                        price_currency = p.get("price_currency") or payload.default_currency
+                        # ✅ normalize_currency applied
+                        price_currency = normalize_currency(
+                            p.get("price_currency") or payload.default_currency
+                        )
                         if not title or not price_amount or price_amount <= 0:
                             skipped += 1
                             continue
@@ -831,7 +1175,7 @@ async def scrape_catalog_items(
                             sku=_clean_scraped_text(p.get("sku")),
                             image_url=p.get("image_url"),
                             price_amount=price_amount,
-                            price_currency=str(price_currency),
+                            price_currency=price_currency,
                         )
                         db.add(item)
                         created.append(item)
@@ -839,6 +1183,7 @@ async def scrape_catalog_items(
             except Exception:
                 pass
 
+        # ── Strategy 2+: Fetch listing page HTML ──────────────────────────
         if not created:
             status_code, html_text = await _fetch_soft(client, url, max_retries=3)
 
@@ -854,10 +1199,12 @@ async def scrape_catalog_items(
                     blocked_status_code=status_code,
                     blocked_hint=(
                         "Site returned a forbidden/rate-limit response (likely anti-bot). "
-                        "Try a different URL (a direct product URL), enable crawling, or use bulk upload instead."
+                        "For JavaScript-heavy sites (Jumia, etc.) a Playwright/Selenium "
+                        "worker is required. Try a direct product URL or use bulk upload."
                     ),
                 )
 
+            # Strategy 2: JSON-LD on listing page
             product_dicts = _products_from_html_jsonld(html_text)
             if product_dicts:
                 new_created, new_skipped = _ingest_products_dicts(
@@ -872,8 +1219,11 @@ async def scrape_catalog_items(
                 if created:
                     mode_used = "jsonld"
 
+            # Strategy 3: Homelink catalogue list pattern
             if not created:
-                homelink_items = _parse_homelink_list_page(html_text, base_url=url, limit=min(payload.max_items, 200))
+                homelink_items = _parse_homelink_list_page(
+                    html_text, base_url=url, limit=min(payload.max_items, 200)
+                )
                 if homelink_items:
                     for p in homelink_items:
                         if len(created) >= payload.max_items:
@@ -890,20 +1240,26 @@ async def scrape_catalog_items(
                             sku=None,
                             image_url=p.get("image_url"),
                             price_amount=price_amount,
-                            price_currency=payload.default_currency,
+                            price_currency=normalize_currency(payload.default_currency),
                         )
                         db.add(item)
                         created.append(item)
                     if created:
                         mode_used = "homelink_list"
 
+            # Strategy 4: Crawl individual product pages
             if payload.crawl_product_pages and len(created) < payload.max_items:
-                links = _extract_product_links(url, html_text, limit=payload.max_product_pages)
+                links = _extract_product_links(
+                    url, html_text, limit=payload.max_product_pages
+                )
                 discovered_links = len(links)
 
                 for link in links:
                     if len(created) >= payload.max_items:
                         break
+
+                    # Small jitter between page fetches to avoid rate limits
+                    await asyncio.sleep(random.uniform(0.3, 0.9))
 
                     try:
                         r = await client.get(link, headers=_browser_like_headers(link))
@@ -916,9 +1272,10 @@ async def scrape_catalog_items(
                     fetched_pages += 1
                     p_html = r.text or ""
 
-                    p_products = _products_from_html_jsonld(p_html)
                     ingested_this_page = False
 
+                    # 4a: JSON-LD on product page
+                    p_products = _products_from_html_jsonld(p_html)
                     if p_products:
                         new_created, new_skipped = _ingest_products_dicts(
                             db=db,
@@ -931,7 +1288,8 @@ async def scrape_catalog_items(
                         skipped += new_skipped
                         ingested_this_page = bool(new_created)
 
-                    if (not ingested_this_page) and payload.try_shopify_product_json:
+                    # 4b: Shopify .js endpoint
+                    if not ingested_this_page and payload.try_shopify_product_json:
                         shopify_p = await _try_shopify_product_json(client, link)
                         if shopify_p:
                             title = _clean_scraped_text(shopify_p.get("name"))
@@ -940,17 +1298,20 @@ async def scrape_catalog_items(
                                 item = _make_item(
                                     membership=membership,
                                     title=title,
-                                    description=_clean_scraped_text(shopify_p.get("description")),
+                                    description=_clean_scraped_text(
+                                        shopify_p.get("description")
+                                    ),
                                     sku=_clean_scraped_text(shopify_p.get("sku")),
                                     image_url=shopify_p.get("image_url"),
                                     price_amount=price_amount,
-                                    price_currency=payload.default_currency,
+                                    price_currency=normalize_currency(payload.default_currency),
                                 )
                                 db.add(item)
                                 created.append(item)
                                 ingested_this_page = True
 
-                    if (not ingested_this_page) and payload.allow_fallback:
+                    # 4c: CSS/XPath structural fallback (handles most standard e-commerce HTML)
+                    if not ingested_this_page and payload.allow_fallback:
                         t, d, sku, image_url, pa = _parse_product_page_fallback(p_html)
                         if t and pa and pa > 0:
                             item = _make_item(
@@ -960,7 +1321,7 @@ async def scrape_catalog_items(
                                 sku=sku,
                                 image_url=image_url,
                                 price_amount=pa,
-                                price_currency=payload.default_currency,
+                                price_currency=normalize_currency(payload.default_currency),
                             )
                             db.add(item)
                             created.append(item)
@@ -969,6 +1330,7 @@ async def scrape_catalog_items(
                     if ingested_this_page and mode_used == "unknown":
                         mode_used = "crawl_product_pages"
 
+            # Strategy 5: OG meta + explicit fallback price (single-page fallback)
             if not created and payload.allow_fallback:
                 og_title, og_desc, og_image = _extract_og_fallback(html_text)
                 fallback_amount = _coerce_decimal(payload.fallback_price_amount)
@@ -980,7 +1342,9 @@ async def scrape_catalog_items(
                         sku=None,
                         image_url=og_image,
                         price_amount=fallback_amount,
-                        price_currency=(payload.fallback_price_currency or payload.default_currency),
+                        price_currency=normalize_currency(
+                            payload.fallback_price_currency or payload.default_currency
+                        ),
                     )
                     db.add(item)
                     created.append(item)
@@ -991,7 +1355,8 @@ async def scrape_catalog_items(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=(
                 "No valid products found to ingest (missing title/price). "
-                "Try a direct product URL, enable crawling, or use bulk upload."
+                "Try a direct product URL, enable crawling, or use bulk upload. "
+                "JavaScript-heavy sites (e.g. Jumia) require a Playwright worker."
             ),
         )
 
@@ -999,7 +1364,9 @@ async def scrape_catalog_items(
     for item in created:
         await db.refresh(item)
 
-    created_models = [CatalogItemResponse.model_validate(i, from_attributes=True) for i in created]
+    created_models = [
+        CatalogItemResponse.model_validate(i, from_attributes=True) for i in created
+    ]
 
     return CatalogScrapeResponse(
         source_url=url,
