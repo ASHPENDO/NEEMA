@@ -9,7 +9,7 @@ from app.core.config import settings
 
 from app.models.social_account import SocialAccount
 from app.models.post_history import PostHistory
-from app.models.campaign import Campaign  # ✅ NEW
+from app.models.campaign import Campaign
 
 from app.services.posting.registry import PLATFORM_REGISTRY
 
@@ -27,6 +27,13 @@ class PostService:
         page_ids = getattr(payload, "page_ids", None) or [payload.page_id]
 
         caption = getattr(payload, "caption", None) or getattr(payload, "message", "")
+
+        # ==============================
+        # 🔥 NEW: MULTI-MEDIA SUPPORT
+        # ==============================
+        media_urls = getattr(payload, "media_urls", None)
+
+        # fallback to single
         media_url = str(payload.image_url) if getattr(payload, "image_url", None) else None
 
         if not caption:
@@ -75,11 +82,11 @@ class PostService:
                 # -----------------------------
                 history = PostHistory(
                     tenant_id=tenant_id,
-                    campaign_id=campaign_id,  # ✅ NEW
+                    campaign_id=campaign_id,
                     platform=platform,
                     page_id=page_id_str,
                     caption=caption,
-                    image_url=media_url,
+                    image_url=media_url,  # keep for backward compatibility
                     status="pending",
                 )
 
@@ -107,7 +114,21 @@ class PostService:
 
                     print(f"[PostService] 🚀 Posting → {platform} / {page_id_str}")
 
-                    result = await poster.post(payload, social_account)
+                    # ==============================
+                    # 🔥 MULTI vs SINGLE PAYLOAD
+                    # ==============================
+                    post_payload = {
+                        "caption": caption,
+                    }
+
+                    if media_urls and len(media_urls) > 1:
+                        # ✅ MULTI-IMAGE (scrollable)
+                        post_payload["media_urls"] = media_urls
+                    else:
+                        # ✅ SINGLE IMAGE (existing)
+                        post_payload["media_url"] = media_url
+
+                    result = await poster.post(post_payload, social_account)
 
                     print(f"[PostService] ✅ Success: {result}")
 
@@ -145,7 +166,7 @@ class PostService:
                     })
 
         # -----------------------------
-        # FINAL: UPDATE CAMPAIGN STATUS ✅
+        # FINAL: UPDATE CAMPAIGN STATUS
         # -----------------------------
         if campaign_id:
             campaign = await db.get(Campaign, campaign_id)

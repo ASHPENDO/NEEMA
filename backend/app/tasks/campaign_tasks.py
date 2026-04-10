@@ -13,6 +13,25 @@ import asyncio
 import time
 
 
+# ==============================
+# 🔥 NEW: PAYLOAD PREPARATION
+# ==============================
+async def prepare_post_payload(campaign):
+
+    # MULTI PRODUCT (scrollable)
+    if campaign.media_urls and len(campaign.media_urls) > 1:
+        return {
+            "caption": campaign.caption,
+            "media_urls": campaign.media_urls,
+        }
+
+    # SINGLE PRODUCT (existing)
+    return {
+        "caption": campaign.caption,
+        "media_url": campaign.media_url,
+    }
+
+
 # ✅ GLOBAL EVENT LOOP
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
@@ -48,9 +67,15 @@ def execute_campaign_task(self, campaign_id: str):
                 print(f"[LOCK] Skipping duplicate execution {campaign_id}")
                 return
 
+            # ==============================
+            # 🔥 NEW: PREPARE POST PAYLOAD
+            # ==============================
+            base_payload = await prepare_post_payload(campaign)
+
             payload = PostPayload(
-                caption=campaign.caption,
-                image_url=campaign.media_url,
+                caption=base_payload.get("caption"),
+                image_url=base_payload.get("media_url"),  # single
+                media_urls=base_payload.get("media_urls"),  # multi
                 page_id=campaign.page_ids[0],
                 platform=campaign.platforms[0],
                 page_ids=campaign.page_ids,

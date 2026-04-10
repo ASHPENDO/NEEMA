@@ -43,7 +43,8 @@ from app.models.meta_catalog import MetaCatalog  # noqa: F401
 from app.models.post_history import PostHistory  # noqa: F401
 from app.models.campaign import Campaign  # noqa: F401
 
+
 # =========================
 # TEMPLATES (NEW)
 # =========================
-from app.models.template import Template  # ✅ NEW
+from app.models.template import Template  # noqa: F401

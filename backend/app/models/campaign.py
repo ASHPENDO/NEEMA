@@ -15,8 +15,11 @@ class Campaign(Base):
     tenant_id = Column(UUID(as_uuid=True), nullable=False, index=True)
 
     # 🔗 LINK TO PRODUCT + TEMPLATE (SUNGURA CORE)
-    product_id = Column(UUID(as_uuid=True), nullable=False)
+    product_id = Column(UUID(as_uuid=True), nullable=False)  # ✅ KEEP (single product support)
     template_id = Column(String, nullable=False)
+
+    # ✅ NEW: MULTI-PRODUCT SUPPORT (MVP SAFE)
+    product_ids = Column(JSON, nullable=True)
 
     # OPTIONAL HUMAN LABEL
     name = Column(String, nullable=True)
@@ -29,7 +32,12 @@ class Campaign(Base):
 
     # CONTENT
     caption = Column(Text, nullable=False)
+
+    # ✅ SINGLE MEDIA (existing)
     media_url = Column(Text, nullable=True)
+
+    # ✅ NEW: MULTI-MEDIA (scrollable posts)
+    media_urls = Column(JSON, nullable=True)
 
     # SCHEDULING (UTC AWARE)
     scheduled_at = Column(DateTime(timezone=True), nullable=True)
