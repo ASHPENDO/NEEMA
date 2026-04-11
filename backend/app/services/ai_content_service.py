@@ -72,6 +72,25 @@ class AIContentService:
             )
 
             # ==============================
+            # 🔥 FORCE FALLBACK (DEV MODE)
+            # ==============================
+            if settings.FORCE_AI_FALLBACK:
+                return {
+                    "hook": "🔥 Hot Deals Available Now!",
+                    "body": "Check out our latest products at unbeatable prices.",
+                    "cta": f"📍 Available in {location}. Call/WhatsApp {contact} now!",
+                    "hashtags": ["#Deal", "#ShopNow"],
+                    "full_caption": f"""🔥 Hot Deals Available Now!
+
+Check out our latest products at unbeatable prices.
+
+📍 Available in {location}
+📞 Call/WhatsApp {contact}
+
+👉 Order now!""".strip(),
+                }
+
+            # ==============================
             # CATEGORY EMOJI
             # ==============================
             def get_category_emoji(name: str):
@@ -198,6 +217,25 @@ Return ONLY valid JSON:
                 or "contact us"
             )
 
+            # ==============================
+            # 🔥 FORCE FALLBACK (DEV MODE)
+            # ==============================
+            if settings.FORCE_AI_FALLBACK:
+                return {
+                    "hook": f"🔥 {product_name}",
+                    "body": description if description else "Check out this amazing product at an unbeatable price.",
+                    "cta": f"📍 Available in {location}. Call/WhatsApp {contact} now!",
+                    "hashtags": ["#Deal", "#ShopNow"],
+                    "full_caption": f"""🔥 {product_name}
+
+{description if description else "Check out this amazing product at an unbeatable price."}
+
+📍 Available in {location}
+📞 Call/WhatsApp {contact}
+
+👉 Order now!""".strip(),
+                }
+
             prompt = f"""
 You are generating a high-converting Facebook ad caption for an SME in East Africa.
 
@@ -281,3 +319,145 @@ Return ONLY valid JSON:
             }
 
             return fallback
+
+    # ==============================
+    # 🔥 TARGETED FIELD REGENERATION
+    # ==============================
+    @staticmethod
+    async def regenerate_field(
+        db,
+        field: str,                  # "hook" | "body" | "cta"
+        current: dict,               # the full current caption dict
+        product_id: str = None,
+        product_ids: list = None,
+        template_id: str = None,
+    ) -> dict:
+        """
+        Regenerates a single field (hook, body, or cta) without touching the others.
+        Returns the updated caption dict with only the requested field replaced.
+        """
+        VALID_FIELDS = {"hook", "body", "cta"}
+        if field not in VALID_FIELDS:
+            raise ValueError(f"Invalid field '{field}'. Must be one of: {VALID_FIELDS}")
+
+        # ── Fetch product + tenant context ──────────────────────────────────
+        if product_ids:
+            products = [p for pid in product_ids if (p := await db.get(CatalogItem, pid))]
+            if not products:
+                raise ValueError("Invalid products")
+            base_product = products[0]
+            tenant = await db.get(Tenant, getattr(base_product, "tenant_id", None))
+            product_name = base_product.title
+            description = ""
+        else:
+            product = await db.get(CatalogItem, product_id)
+            if not product:
+                raise ValueError("Invalid product")
+            tenant = await db.get(Tenant, getattr(product, "tenant_id", None))
+            product_name = product.title
+            description = getattr(product, "description", "") or ""
+
+        if not tenant:
+            raise ValueError("Tenant not found for product")
+
+        location = getattr(tenant, "business_location", "") or "your area"
+        contact = (
+            getattr(tenant, "phone_number", None)
+            or getattr(tenant, "whatsapp_number", None)
+            or "contact us"
+        )
+
+        # ── Field-specific prompt ────────────────────────────────────────────
+        existing_hook = current.get("hook", "")
+        existing_body = current.get("body", "")
+        existing_cta  = current.get("cta", "")
+
+        field_instructions = {
+            "hook": f"""Rewrite ONLY the hook line for this Facebook ad.
+Keep the body and CTA unchanged:
+  Body: {existing_body}
+  CTA:  {existing_cta}
+
+Rules:
+- Must grab attention immediately
+- Include price or urgency framing
+- Max 1–2 sentences, mobile-first
+- Use relevant emoji""",
+
+            "body": f"""Rewrite ONLY the body copy for this Facebook ad.
+Keep the hook and CTA unchanged:
+  Hook: {existing_hook}
+  CTA:  {existing_cta}
+
+Rules:
+- Clearly describe the product: {product_name}
+- Description hint: {description}
+- 2–3 short sentences, persuasive
+- Use East African tone""",
+
+            "cta": f"""Rewrite ONLY the CTA for this Facebook ad.
+Keep the hook and body unchanged:
+  Hook: {existing_hook}
+  Body: {existing_body}
+
+Rules:
+- MUST include location: {location}
+- MUST include contact: {contact}
+- Action-oriented (call, WhatsApp, visit, order)
+- Max 1–2 sentences""",
+        }
+
+        prompt = f"""You are a high-converting digital marketing expert for East African SMEs.
+
+TASK: {field_instructions[field]}
+
+OUTPUT FORMAT:
+Return ONLY valid JSON with a single key:
+{{ "{field}": "..." }}
+
+Do NOT include any other fields."""
+
+        if template_id:
+            template = await db.get(Template, template_id)
+            if template:
+                prompt += f"\n\nSTYLE: Use this tone/style: {template.name}"
+
+        # ── OpenAI call ──────────────────────────────────────────────────────
+        try:
+            response = await client.chat.completions.create(
+                model="gpt-4.1-mini",
+                messages=[
+                    {"role": "system", "content": "You are a high-converting digital marketing expert."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.8,          # slightly higher for creative variation
+            )
+
+            raw_output = response.choices[0].message.content.strip()
+
+            try:
+                parsed = json.loads(raw_output)
+            except Exception:
+                raise ValueError("AI did not return valid JSON")
+
+            if field not in parsed:
+                raise ValueError(f"AI response missing key '{field}'")
+
+            # Merge the new field into the existing caption
+            updated = {**current, field: parsed[field]}
+
+            # Rebuild full_caption to stay in sync
+            updated["full_caption"] = f"""{updated['hook']}
+
+{updated['body']}
+
+{updated['cta']}
+
+{' '.join(updated.get('hashtags', []))}""".strip()
+
+            return updated
+
+        except Exception as e:
+            print(f"[AI REGEN ERROR] field={field} error={e}")
+            # Return original unchanged on failure
+            return current
