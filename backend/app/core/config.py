@@ -86,6 +86,8 @@ class Settings(BaseSettings):
     # -----------------------------
     OPENAI_API_KEY: str
 
+    FORCE_AI_FALLBACK: bool = True  # 🔥 toggle for dev
+
     # ==================================================
     # 🔐 SAFE MODE (NEW — DOES NOT BREAK EXISTING LOGIC)
     # ==================================================

@@ -10,10 +10,11 @@ router = APIRouter(prefix="/ai", tags=["AI"])
 
 
 # ==============================
-# REQUEST SCHEMAS
+# REQUEST SCHEMAS (FIXED)
 # ==============================
 class AIGenerateRequest(BaseModel):
-    product_id: str = Field(..., description="Product ID")
+    product_id: Optional[str] = Field(None, description="Single product ID")
+    product_ids: Optional[List[str]] = Field(None, description="Multiple product IDs")
     template_id: Optional[str] = Field(None, description="Optional template ID")
 
 
@@ -61,7 +62,7 @@ def normalize_ai_response(result: Any) -> Dict[str, Any]:
 
 
 # ==============================
-# GENERATE FULL AI CONTENT
+# GENERATE FULL AI CONTENT (FIXED)
 # ==============================
 @router.post("/generate")
 async def generate_ai_content(
@@ -69,9 +70,14 @@ async def generate_ai_content(
     db: AsyncSession = Depends(get_db),
 ):
     try:
+        # 🔥 VALIDATION (CRITICAL FIX)
+        if not payload.product_id and not payload.product_ids:
+            raise ValueError("At least one product is required")
+
         raw_result = await AIContentService.generate(
             db=db,
             product_id=payload.product_id,
+            product_ids=payload.product_ids,  # ✅ NEW
             template_id=payload.template_id,
         )
 
@@ -94,7 +100,7 @@ async def generate_ai_content(
 
 
 # ==============================
-# 🔥 PARTIAL REGENERATION (NEW)
+# 🔥 PARTIAL REGENERATION (UNCHANGED BUT SAFE)
 # ==============================
 @router.post("/regenerate")
 async def regenerate_section(
@@ -105,6 +111,9 @@ async def regenerate_section(
         # Validate section
         if payload.section not in {"hook", "body", "cta"}:
             raise ValueError("Invalid section. Must be 'hook', 'body', or 'cta'.")
+
+        if not payload.product_id and not payload.product_ids:
+            raise ValueError("At least one product is required")
 
         raw_result = await AIContentService.generate(
             db=db,

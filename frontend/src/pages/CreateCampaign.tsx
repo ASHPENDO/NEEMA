@@ -162,13 +162,13 @@ export default function CreateCampaign() {
       let result: AIResult;
 
       // Unwrap envelope if present
-      const responseData: unknown =
+      const unwrappedpayload: unknown =
         (data && typeof data === "object" && (data as any).data)
           ? (data as any).data
           : data;
 
-      if (responseData && typeof responseData === "object") {
-        const d = responseData as Record<string, unknown>;
+      if (unwrappedpayload && typeof unwrappedpayload === "object") {
+        const d = unwrappedpayload as Record<string, unknown>;
 
         const hook        = (d.hook  as string) ?? "";
         const body        = (d.body  as string) ?? "";
@@ -381,7 +381,6 @@ export default function CreateCampaign() {
                   )}
                   <div className="px-2 py-1.5">
                     <p className="text-xs font-semibold text-gray-800 truncate">{stripHtml(p.title)}</p>
-                    {/* ✅ formatPrice with currency */}
                     <p className="text-xs text-gray-400">
                       {formatPrice(Number(p.price_amount), p.price_currency ?? "KES")}
                     </p>
@@ -396,6 +395,16 @@ export default function CreateCampaign() {
                   </button>
                 </div>
               ))}
+            </div>
+
+            {/* ✅ UX communication — tell user what AI will inject automatically */}
+            <div className="mt-3 flex items-start gap-2 bg-indigo-50 border border-indigo-100 rounded-xl px-4 py-3">
+              <span className="text-indigo-400 text-base mt-0.5 shrink-0">ℹ️</span>
+              <p className="text-xs text-indigo-700 leading-relaxed">
+                <strong>Product descriptions, pricing, location, and contact details</strong> are
+                automatically injected into the AI caption — you don't need to add them manually.
+                Just click <strong>Generate</strong> below.
+              </p>
             </div>
           </section>
         )}
@@ -478,8 +487,8 @@ export default function CreateCampaign() {
               className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 disabled:cursor-not-allowed text-white px-4 py-3 rounded-xl text-sm font-bold transition flex items-center justify-center gap-2"
             >
               {aiLoading
-                ? <><Spinner /> Generating…</>
-                : <>✨ Generate with AI{selectedProductIds.length > 1 ? ` (${selectedProductIds.length} products)` : ""}</>}
+                ? <><Spinner /> Generating caption…</>
+                : <>✨ Generate AI Caption{selectedProductIds.length > 0 ? ` — auto-includes details` : ""}{selectedProductIds.length > 1 ? ` (${selectedProductIds.length} products)` : ""}</>}
             </button>
 
             {aiResult && (
