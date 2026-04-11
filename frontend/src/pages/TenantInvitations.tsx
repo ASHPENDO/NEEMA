@@ -28,45 +28,52 @@ function formatDate(iso?: string | null) {
 function computeStatus(inv: TenantInvitation): string {
   const anyInv = inv as any;
   if (typeof anyInv.status === "string" && anyInv.status.trim().length > 0) return anyInv.status;
-
   if (inv.accepted_at) return "accepted";
-
   if (inv.expires_at) {
     const exp = new Date(inv.expires_at);
     if (!Number.isNaN(exp.getTime()) && exp.getTime() < Date.now()) return "expired";
   }
-
   return "pending";
+}
+
+// Status badge
+function StatusBadge({ status }: { status: string }) {
+  const colors: Record<string, string> = {
+    accepted: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    pending:  "bg-amber-50 text-amber-700 border-amber-200",
+    expired:  "bg-slate-100 text-slate-500 border-slate-200",
+    revoked:  "bg-red-50 text-red-600 border-red-200",
+  };
+  const cls = colors[status.toLowerCase()] ?? colors.pending;
+  return (
+    <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold capitalize ${cls}`}>
+      {status}
+    </span>
+  );
 }
 
 export default function TenantInvitations() {
   const nav = useNavigate();
   const tenantId = useMemo(() => activeTenantStorage.get(), []);
 
-  const [items, setItems] = useState<TenantInvitation[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [items, setItems]           = useState<TenantInvitation[]>([]);
+  const [loading, setLoading]       = useState(true);
+  const [error, setError]           = useState<string | null>(null);
+  const [permissionDenied, setPermDenied] = useState(false);
 
-  const [permissionDenied, setPermissionDenied] = useState(false);
-
-  const [email, setEmail] = useState("");
-  const [role, setRole] = useState<TenantRole>("STAFF");
+  const [email, setEmail]           = useState("");
+  const [role, setRole]             = useState<TenantRole>("STAFF");
   const [submitting, setSubmitting] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
+  const [formError, setFormError]   = useState<string | null>(null);
 
   const [resendingId, setResendingId] = useState<string | null>(null);
-  const [revokingId, setRevokingId] = useState<string | null>(null);
+  const [revokingId, setRevokingId]   = useState<string | null>(null);
 
-  const emailNorm = useMemo(() => normalizeEmail(email), [email]);
-  const emailError =
-    email.length === 0 ? undefined : isValidEmail(emailNorm) ? undefined : "Enter a valid email address.";
+  const emailNorm  = useMemo(() => normalizeEmail(email), [email]);
+  const emailError = email.length === 0 ? undefined : isValidEmail(emailNorm) ? undefined : "Enter a valid email address.";
 
   useEffect(() => {
-    if (!tenantId) {
-      nav("/tenant-selection", { replace: true });
-      return;
-    }
-
+    if (!tenantId) { nav("/tenant-selection", { replace: true }); return; }
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenantId]);
@@ -74,21 +81,15 @@ export default function TenantInvitations() {
   async function refresh() {
     setLoading(true);
     setError(null);
-
     try {
       const data = await listTenantInvitations();
       const list = Array.isArray(data) ? data : (data as any)?.items;
       setItems(Array.isArray(list) ? list : []);
-      setPermissionDenied(false);
+      setPermDenied(false);
     } catch (e) {
       const err = e as ApiError;
-
-      if (err?.status === 403) {
-        setPermissionDenied(true);
-        setError("You do not have permission to manage invitations.");
-      } else {
-        setError(err?.message ?? "Failed to load invitations.");
-      }
+      if (err?.status === 403) { setPermDenied(true); setError("You do not have permission to manage invitations."); }
+      else setError(err?.message ?? "Failed to load invitations.");
     } finally {
       setLoading(false);
     }
@@ -97,12 +98,7 @@ export default function TenantInvitations() {
   async function onCreate(e: React.FormEvent) {
     e.preventDefault();
     setFormError(null);
-
-    if (!isValidEmail(emailNorm)) {
-      setFormError("Please enter a valid email.");
-      return;
-    }
-
+    if (!isValidEmail(emailNorm)) { setFormError("Please enter a valid email."); return; }
     setSubmitting(true);
     try {
       await createTenantInvitation({ email: emailNorm, role });
@@ -111,15 +107,9 @@ export default function TenantInvitations() {
       await refresh();
     } catch (e) {
       const err = e as ApiError;
-
-      if (err?.status === 409) {
-        setFormError("This user is already a member of this workspace.");
-      } else if (err?.status === 403) {
-        setPermissionDenied(true);
-        setFormError("You do not have permission to invite members.");
-      } else {
-        setFormError(err?.message ?? "Failed to create invitation.");
-      }
+      if (err?.status === 409) setFormError("This user is already a member of this workspace.");
+      else if (err?.status === 403) { setPermDenied(true); setFormError("You do not have permission to invite members."); }
+      else setFormError(err?.message ?? "Failed to create invitation.");
     } finally {
       setSubmitting(false);
     }
@@ -132,17 +122,10 @@ export default function TenantInvitations() {
       await refresh();
     } catch (e) {
       const err = e as ApiError;
-
-      if (err?.status === 409) {
-        alert(err?.message ?? "This invitation cannot be resent.");
-      } else if (err?.status === 403) {
-        setPermissionDenied(true);
-        alert("You do not have permission to resend invitations.");
-      } else if (err?.status === 404) {
-        alert("Invitation not found.");
-      } else {
-        alert(err?.message ?? "Failed to resend invitation.");
-      }
+      if (err?.status === 409) alert(err?.message ?? "This invitation cannot be resent.");
+      else if (err?.status === 403) { setPermDenied(true); alert("You do not have permission to resend invitations."); }
+      else if (err?.status === 404) alert("Invitation not found.");
+      else alert(err?.message ?? "Failed to resend invitation.");
     } finally {
       setResendingId(null);
     }
@@ -151,73 +134,84 @@ export default function TenantInvitations() {
   async function onRevoke(inviteId: string) {
     const ok = window.confirm("Revoke this invitation?");
     if (!ok) return;
-
     setRevokingId(inviteId);
     try {
       await revokeTenantInvitation(inviteId);
       await refresh();
     } catch (e) {
       const err = e as ApiError;
-
-      if (err?.status === 409) {
-        alert(err?.message ?? "This invitation cannot be revoked.");
-      } else if (err?.status === 403) {
-        setPermissionDenied(true);
-        alert("You do not have permission to revoke invitations.");
-      } else if (err?.status === 404) {
-        alert("Invitation not found.");
-      } else {
-        alert(err?.message ?? "Failed to revoke invitation.");
-      }
+      if (err?.status === 409) alert(err?.message ?? "This invitation cannot be revoked.");
+      else if (err?.status === 403) { setPermDenied(true); alert("You do not have permission to revoke invitations."); }
+      else if (err?.status === 404) alert("Invitation not found.");
+      else alert(err?.message ?? "Failed to revoke invitation.");
     } finally {
       setRevokingId(null);
     }
   }
 
   return (
-    <PageShell title="Tenant Invitations" subtitle="Invite your team members into this tenant.">
+    <PageShell
+      title="Tenant Invitations"
+      subtitle="Invite your team members into this tenant."
+    >
       <div className="space-y-6">
+        {/* Permission banner */}
         {permissionDenied && (
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            <svg className="mt-0.5 h-4 w-4 shrink-0" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M8 1.5 1.5 13.5h13L8 1.5Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+              <path d="M8 6v4M8 11.5v.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
             You do not have permission to manage invitations in this tenant.
           </div>
         )}
 
-        <form onSubmit={onCreate} className="rounded-2xl border border-slate-200 bg-white p-4 space-y-3">
-          <div className="grid grid-cols-1 items-end gap-3 md:grid-cols-3">
+        {/* Invite form */}
+        <form onSubmit={onCreate} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="grid grid-cols-1 items-end gap-4 md:grid-cols-3">
             <div className="md:col-span-2">
-              <label className="mb-1 block text-sm text-slate-700">Invitee email</label>
+              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Invitee email
+              </label>
               <Input
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="team@company.com"
                 disabled={permissionDenied}
               />
-              {emailError && <p className="mt-1 text-sm text-red-600">{emailError}</p>}
+              {emailError && (
+                <p className="mt-1.5 text-xs text-red-600">{emailError}</p>
+              )}
             </div>
 
             <div>
-              <label className="mb-1 block text-sm text-slate-700">Role</label>
+              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Role
+              </label>
               <select
                 value={role}
                 onChange={(e) => setRole(e.target.value as TenantRole)}
                 disabled={permissionDenied}
-                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900"
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm transition hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-slate-300 disabled:opacity-50"
               >
                 {ROLE_OPTIONS.map((r) => (
-                  <option key={r} value={r}>
-                    {r}
-                  </option>
+                  <option key={r} value={r}>{r}</option>
                 ))}
               </select>
             </div>
           </div>
 
-          {formError && <p className="text-sm text-red-600">{formError}</p>}
+          {formError && (
+            <p className="mt-3 text-sm text-red-600">{formError}</p>
+          )}
 
-          <div className="flex gap-2">
-            <Button type="submit" disabled={submitting || !!emailError || email.length === 0 || permissionDenied}>
-              {submitting ? "Inviting..." : "Send invitation"}
+          <div className="mt-4 flex gap-2">
+            <Button
+              type="submit"
+              disabled={submitting || !!emailError || email.length === 0 || permissionDenied}
+              loading={submitting}
+            >
+              {submitting ? "Inviting…" : "Send invitation"}
             </Button>
             <Button type="button" variant="secondary" onClick={() => nav("/dashboard")}>
               Back
@@ -225,48 +219,55 @@ export default function TenantInvitations() {
           </div>
         </form>
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-4">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-slate-900">Invitations</h2>
+        {/* Invitations table */}
+        <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-5 py-3">
+            <h2 className="text-sm font-semibold text-slate-800">Invitations</h2>
             <Button type="button" variant="secondary" onClick={refresh} disabled={loading}>
-              Refresh
+              {loading ? "Loading…" : "Refresh"}
             </Button>
           </div>
 
           {loading ? (
-            <p className="text-sm text-slate-600">Loading...</p>
+            <div className="flex items-center gap-2.5 px-6 py-8 text-sm text-slate-500">
+              <svg className="h-4 w-4 animate-spin text-slate-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              Loading…
+            </div>
           ) : error ? (
-            <p className="text-sm text-red-600">{error}</p>
+            <p className="px-6 py-6 text-sm text-red-600">{error}</p>
           ) : items.length === 0 ? (
-            <p className="text-sm text-slate-600">No invitations yet.</p>
+            <p className="px-6 py-8 text-sm text-slate-500">No invitations yet.</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
-                <thead className="text-slate-600">
-                  <tr className="border-b border-slate-200">
-                    <th className="py-2 pr-3">Email</th>
-                    <th className="py-2 pr-3">Role</th>
-                    <th className="py-2 pr-3">Status</th>
-                    <th className="py-2 pr-3">Expires</th>
-                    <th className="py-2 pr-3">Created</th>
-                    <th className="py-2 text-right">Actions</th>
+                <thead>
+                  <tr className="border-b border-slate-100">
+                    <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Email</th>
+                    <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Role</th>
+                    <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Status</th>
+                    <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Expires</th>
+                    <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Created</th>
+                    <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-400">Actions</th>
                   </tr>
                 </thead>
 
-                <tbody className="text-slate-900">
+                <tbody className="divide-y divide-slate-100">
                   {items.map((inv) => {
-                    const status = computeStatus(inv);
+                    const status  = computeStatus(inv);
                     const rowBusy = resendingId === inv.id || revokingId === inv.id;
                     const showActions = status === "pending" && !permissionDenied;
 
                     return (
-                      <tr key={inv.id} className="border-b border-slate-100">
-                        <td className="py-3 pr-3">{inv.email}</td>
-                        <td className="py-3 pr-3">{inv.role}</td>
-                        <td className="py-3 pr-3 capitalize">{status}</td>
-                        <td className="py-3 pr-3">{formatDate(inv.expires_at)}</td>
-                        <td className="py-3 pr-3">{formatDate(inv.created_at)}</td>
-                        <td className="py-3 text-right">
+                      <tr key={inv.id} className="transition hover:bg-slate-50/60">
+                        <td className="px-5 py-3 font-medium text-slate-800">{inv.email}</td>
+                        <td className="px-5 py-3 text-slate-600">{inv.role}</td>
+                        <td className="px-5 py-3"><StatusBadge status={status} /></td>
+                        <td className="px-5 py-3 text-slate-500">{formatDate(inv.expires_at)}</td>
+                        <td className="px-5 py-3 text-slate-500">{formatDate(inv.created_at)}</td>
+                        <td className="px-5 py-3 text-right">
                           {showActions ? (
                             <div className="inline-flex gap-2">
                               <Button
@@ -275,7 +276,7 @@ export default function TenantInvitations() {
                                 disabled={rowBusy}
                                 onClick={() => onResend(inv.id)}
                               >
-                                {resendingId === inv.id ? "Resending..." : "Resend"}
+                                {resendingId === inv.id ? "Resending…" : "Resend"}
                               </Button>
                               <Button
                                 type="button"
@@ -283,11 +284,11 @@ export default function TenantInvitations() {
                                 disabled={rowBusy}
                                 onClick={() => onRevoke(inv.id)}
                               >
-                                {revokingId === inv.id ? "Revoking..." : "Revoke"}
+                                {revokingId === inv.id ? "Revoking…" : "Revoke"}
                               </Button>
                             </div>
                           ) : (
-                            <span className="text-xs text-slate-400">—</span>
+                            <span className="text-xs text-slate-300">—</span>
                           )}
                         </td>
                       </tr>

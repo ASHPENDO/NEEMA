@@ -12,8 +12,23 @@ export default function AppLayout() {
   if (isBootstrapping) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
-        <div className="rounded-2xl border border-slate-200 bg-white px-6 py-5 text-sm text-slate-600 shadow-sm">
-          Loading workspace...
+        <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-6 py-5 shadow-sm">
+          {/* Spinner */}
+          <svg
+            className="h-4 w-4 animate-spin text-slate-400"
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path
+              className="opacity-75"
+              fill="currentColor"
+              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+            />
+          </svg>
+          <span className="text-sm text-slate-600">Loading workspace…</span>
         </div>
       </div>
     );
@@ -27,11 +42,9 @@ export default function AppLayout() {
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <div className="min-h-screen lg:flex">
         <Sidebar />
-
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 flex flex-col">
           <Topbar />
-
-          <main className="mx-auto w-full max-w-7xl px-4 py-4 lg:px-6 lg:py-6">
+          <main className="flex-1 mx-auto w-full max-w-5xl px-4 py-6 lg:px-8 lg:py-8">
             <Outlet />
           </main>
         </div>
