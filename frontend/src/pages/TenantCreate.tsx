@@ -1,3 +1,4 @@
+// src/pages/TenantCreate.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
@@ -20,12 +21,22 @@ function extractDetail(err: unknown): any {
   return e?.body?.detail ?? e?.data?.detail ?? e?.detail ?? null;
 }
 
+// Destinations that are unsafe to return to after tenant creation.
+// Navigating back to these would restart the onboarding loop.
+const DISALLOWED_NEXT = new Set(["/tenant-gate", "/tenant-create", "/tenant-selection"]);
+
+function sanitizeNext(next: string | null): string {
+  if (!next) return "/dashboard";
+  if (DISALLOWED_NEXT.has(next)) return "/dashboard";
+  return next;
+}
+
 export default function TenantCreate() {
   const nav = useNavigate();
   const loc = useLocation();
   const [params] = useSearchParams();
 
-  const { isBootstrapping, isAuthed, me, logout, getPendingInviteToken } = useAuth();
+  const { isBootstrapping, isAuthed, me, logout, getPendingInviteToken, refreshMe } = useAuth();
 
   const next = useMemo(() => safeInternalPath(params.get("next")), [params]);
 
@@ -92,7 +103,13 @@ export default function TenantCreate() {
       });
 
       activeTenantStorage.set(created.id);
-      nav(next ?? "/dashboard", { replace: true });
+
+      // Sync AuthContext so guards see the updated me.tenants before
+      // we navigate — prevents stale-state redirects back to this page.
+      await refreshMe();
+
+      // Sanitize next: never bounce back into the onboarding funnel.
+      nav(sanitizeNext(next), { replace: true });
     } catch (err) {
       if (err instanceof ApiError) {
         const detail = extractDetail(err);
@@ -212,7 +229,7 @@ export default function TenantCreate() {
             </label>
 
             <div className="flex flex-wrap gap-2 pt-2">
-              <Button type="submit" disabled={submitting}>
+              <Button type="submit" disabled={submitting} loading={submitting}>
                 {submitting ? "Creating…" : "Create workspace"}
               </Button>
 

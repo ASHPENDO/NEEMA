@@ -9,6 +9,7 @@
  *  5. Pagination: 25/50/100/150, NEMIS-style page buttons with ellipsis
  *  6. Mobile-first responsive layout (card view on small screens, table on md+)
  *  7. HTML entities decoded everywhere before display/storage
+ *  8. Inline styles on all action buttons — guarantees visibility in Tailwind v4
  */
 
 import { useState, useEffect, useRef, Fragment } from "react";
@@ -31,11 +32,10 @@ import {
 // HELPERS
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Remove ALL HTML tags and decode common entities */
 function stripHtml(raw?: string | null): string {
   if (!raw) return "";
   return raw
-    .replace(/<[^>]*>/g, " ")       // remove tags
+    .replace(/<[^>]*>/g, " ")
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
@@ -47,24 +47,11 @@ function stripHtml(raw?: string | null): string {
     .trim();
 }
 
-/**
- * Extract a caption string from any shape the AI endpoint returns.
- *
- * Handles all known response shapes:
- *   "string"
- *   { full_caption }
- *   { caption }
- *   { data: { full_caption } }         <- backend wraps in { success, data }
- *   { success: true, data: { ... } }
- */
 function extractCaption(data: unknown): string {
   if (!data) return "";
   if (typeof data === "string") return data.trim();
-
   if (typeof data === "object" && data !== null) {
     const d = data as Record<string, unknown>;
-
-    // Unwrap { success: true, data: { ... } } envelope first
     if (d.data && typeof d.data === "object") {
       const inner = d.data as Record<string, unknown>;
       const innerCandidate =
@@ -73,14 +60,10 @@ function extractCaption(data: unknown): string {
       if (typeof innerCandidate === "string" && innerCandidate.trim())
         return innerCandidate.trim();
     }
-
-    // Top-level fields
     const candidate =
       d.full_caption ?? d.caption ?? d.text ?? d.content ??
       d.result ?? d.output ?? d.message;
     if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
-
-    // Array content blocks (Anthropic-style)
     if (Array.isArray(d.content) && d.content.length > 0) {
       const first = d.content[0];
       if (typeof first === "string") return first.trim();
@@ -88,8 +71,6 @@ function extractCaption(data: unknown): string {
         return (first as any).text.trim();
     }
   }
-
-  // Last resort: show raw JSON so developer can see the exact shape
   try { return JSON.stringify(data, null, 2); } catch { return ""; }
 }
 
@@ -99,6 +80,48 @@ function formatPrice(item: CatalogItem): string {
   if (isNaN(n)) return "—";
   return `${item.price_currency ?? "KES"} ${n.toLocaleString()}`;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INLINE STYLE CONSTANTS — bypass Tailwind v4 scanning entirely
+// ─────────────────────────────────────────────────────────────────────────────
+
+const S = {
+  btnDark: {
+    backgroundColor: "#1f2937",  // gray-800
+    color: "#ffffff",
+    border: "none",
+  } as React.CSSProperties,
+  btnBlue: {
+    backgroundColor: "#2563eb",  // blue-600
+    color: "#ffffff",
+    border: "none",
+  } as React.CSSProperties,
+  btnRed: {
+    backgroundColor: "#dc2626",  // red-600
+    color: "#ffffff",
+    border: "none",
+  } as React.CSSProperties,
+  btnIndigo: {
+    backgroundColor: "#4f46e5",  // indigo-600
+    color: "#ffffff",
+    border: "none",
+  } as React.CSSProperties,
+  btnIndigoOutline: {
+    backgroundColor: "#eef2ff",  // indigo-50
+    color: "#4338ca",            // indigo-700
+    border: "1px solid #c7d2fe", // indigo-200
+  } as React.CSSProperties,
+  btnOutline: {
+    backgroundColor: "#ffffff",
+    color: "#374151",            // gray-700
+    border: "1px solid #d1d5db", // gray-300
+  } as React.CSSProperties,
+  btnYellow: {
+    backgroundColor: "#eab308",  // yellow-500
+    color: "#ffffff",
+    border: "none",
+  } as React.CSSProperties,
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SHARED MODAL WRAPPER
@@ -123,17 +146,16 @@ function Modal({
       <div
         className={`bg-white rounded-2xl shadow-2xl w-full ${wide ? "max-w-2xl" : "max-w-md"} max-h-[90vh] flex flex-col`}
       >
-        {/* Sticky header */}
         <div className="flex items-center justify-between px-6 py-4 border-b shrink-0">
           <h2 className="text-base font-bold text-gray-900 leading-tight">{title}</h2>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-700 w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 transition text-lg leading-none"
+            style={S.btnOutline}
+            className="w-8 h-8 flex items-center justify-center rounded-full transition text-lg leading-none"
           >
             ✕
           </button>
         </div>
-        {/* Scrollable body */}
         <div className="overflow-y-auto flex-1 px-6 py-5">{children}</div>
       </div>
     </div>
@@ -144,13 +166,7 @@ function Modal({
 // BULK UPLOAD ZIP
 // ─────────────────────────────────────────────────────────────────────────────
 
-function BulkUploadModal({
-  onClose,
-  onSuccess,
-}: {
-  onClose: () => void;
-  onSuccess: () => void;
-}) {
+function BulkUploadModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<{ created: number; errors: number } | null>(null);
@@ -180,7 +196,6 @@ function BulkUploadModal({
         <code className="bg-gray-100 px-1 rounded text-xs">products.csv</code> or{" "}
         <code className="bg-gray-100 px-1 rounded text-xs">products.json</code> manifest.
       </p>
-
       <div
         onClick={() => inputRef.current?.click()}
         className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition mb-4"
@@ -202,20 +217,17 @@ function BulkUploadModal({
         <input ref={inputRef} type="file" accept=".zip" className="hidden"
           onChange={(e) => { const f = e.target.files?.[0]; if (f) { setFile(f); setError(""); setResult(null); } }} />
       </div>
-
       {error && <p className="text-red-600 text-sm mb-3 bg-red-50 border border-red-200 p-3 rounded-lg">{error}</p>}
       {result && (
         <div className={`mb-3 p-3 rounded-lg text-sm border ${result.errors > 0 ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-green-50 text-green-700 border-green-200"}`}>
           ✓ Imported <strong>{result.created}</strong> products{result.errors > 0 ? ` · ${result.errors} errors` : ""}
         </div>
       )}
-
       <div className="flex gap-2 justify-end">
-        <button onClick={onClose} className="px-4 py-2 rounded-lg border text-sm text-gray-600 hover:bg-gray-50">Cancel</button>
-        <button onClick={handleUpload} disabled={loading || !file}
-          className="px-4 py-2 rounded-lg bg-gray-900 text-white text-sm font-semibold disabled:opacity-50 flex items-center gap-2">
-          {loading && <Spinner />}
-          {loading ? "Uploading…" : "Upload"}
+        <button onClick={onClose} style={S.btnOutline} className="px-4 py-2 rounded-lg text-sm">Cancel</button>
+        <button onClick={handleUpload} disabled={loading || !file} style={S.btnDark}
+          className="px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 flex items-center gap-2">
+          {loading && <Spinner />}{loading ? "Uploading…" : "Upload"}
         </button>
       </div>
     </Modal>
@@ -226,13 +238,7 @@ function BulkUploadModal({
 // IMPORT URL
 // ─────────────────────────────────────────────────────────────────────────────
 
-function ImportUrlModal({
-  onClose,
-  onSuccess,
-}: {
-  onClose: () => void;
-  onSuccess: () => void;
-}) {
+function ImportUrlModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
   const [url, setUrl] = useState("");
   const [maxItems, setMaxItems] = useState("50");
   const [loading, setLoading] = useState(false);
@@ -244,23 +250,12 @@ function ImportUrlModal({
     const trimmed = url.trim();
     if (!trimmed) { setError("Please enter a URL."); return; }
     try { new URL(trimmed); } catch { setError("Enter a valid URL including https://"); return; }
-
     try {
       setLoading(true); setError(""); setResult(null);
-
-      const steps = [
-        "Connecting to site…",
-        "Detecting product structure…",
-        "Crawling product pages…",
-        "Extracting products…",
-      ];
+      const steps = ["Connecting to site…", "Detecting product structure…", "Crawling product pages…", "Extracting products…"];
       let si = 0;
       setStep(steps[0]);
-      const ticker = setInterval(() => {
-        si = (si + 1) % steps.length;
-        setStep(steps[si]);
-      }, 1200);
-
+      const ticker = setInterval(() => { si = (si + 1) % steps.length; setStep(steps[si]); }, 1200);
       const res = await scrapeCatalogItems({
         url: trimmed,
         max_items: parseInt(maxItems) || 50,
@@ -272,53 +267,37 @@ function ImportUrlModal({
         fallback_price_amount: null,
         fallback_price_currency: null,
       });
-
-      clearInterval(ticker);
-      setStep("");
-
+      clearInterval(ticker); setStep("");
       const created = res.created?.length ?? 0;
       setResult({ created, skipped: res.skipped ?? 0, mode: res.mode_used ?? "generic" });
-
-      if (created > 0) {
-        onSuccess();
-        setTimeout(onClose, 2200);
-      }
+      if (created > 0) { onSuccess(); setTimeout(onClose, 2200); }
     } catch (err: any) {
       setStep("");
       const msg: string = err?.message || "Import failed.";
       if (msg.toLowerCase().includes("block") || msg.includes("403"))
         setError("This site blocks scrapers. Try a direct product page URL, or use Bulk Upload ZIP instead.");
-      else if (msg.includes("404"))
-        setError("URL not found (404). Double-check the address.");
-      else
-        setError(msg);
-    } finally {
-      setLoading(false);
-    }
+      else if (msg.includes("404")) setError("URL not found (404). Double-check the address.");
+      else setError(msg);
+    } finally { setLoading(false); }
   }
 
   return (
     <Modal title="Import from URL" onClose={onClose} wide>
       <p className="text-sm text-gray-500 mb-1">
-        Paste any product listing or product page URL. We'll automatically detect the
-        site structure and import products with their prices and images.
+        Paste any product listing or product page URL. We'll automatically detect the site structure and import products.
       </p>
       <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-700 mb-4">
         ⚠ Some sites require JavaScript to display products and cannot be scraped directly.
-        If import returns 0 products, try pasting a direct product page URL or use{" "}
-        <strong>Bulk Upload ZIP</strong> instead.
+        If import returns 0 products, try pasting a direct product page URL or use <strong>Bulk Upload ZIP</strong> instead.
       </div>
-
       <div className="space-y-3 mb-4">
-        <input
-          type="url"
+        <input type="url"
           placeholder="https://www.phoneplacekenya.com/product-category/smartphones/motorola-phones/"
           value={url}
           onChange={(e) => { setUrl(e.target.value); setError(""); setResult(null); }}
           onKeyDown={(e) => e.key === "Enter" && !loading && handleImport()}
           className="w-full border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          autoFocus
-        />
+          autoFocus />
         <div className="flex items-center gap-3">
           <label className="text-xs font-semibold text-gray-600 whitespace-nowrap">Max products:</label>
           <select value={maxItems} onChange={(e) => setMaxItems(e.target.value)}
@@ -327,29 +306,24 @@ function ImportUrlModal({
           </select>
         </div>
       </div>
-
       {loading && step && (
         <div className="flex items-center gap-2 text-sm text-blue-600 bg-blue-50 border border-blue-100 rounded-lg px-4 py-3 mb-3">
           <Spinner className="text-blue-500" /> {step}
         </div>
       )}
-      {error && (
-        <div className="text-red-700 text-sm bg-red-50 border border-red-200 rounded-lg px-4 py-3 mb-3">{error}</div>
-      )}
+      {error && <div className="text-red-700 text-sm bg-red-50 border border-red-200 rounded-lg px-4 py-3 mb-3">{error}</div>}
       {result && (
         <div className={`mb-3 p-3 rounded-lg text-sm border ${result.created > 0 ? "bg-green-50 text-green-700 border-green-200" : "bg-amber-50 text-amber-700 border-amber-200"}`}>
           {result.created > 0
             ? <>✓ Imported <strong>{result.created}</strong> products{result.skipped > 0 ? ` (${result.skipped} skipped)` : ""} via <em>{result.mode}</em></>
-            : <>⚠ Connected but found <strong>0 products</strong>. The page may require JavaScript. Try a direct product URL or ZIP upload.</>}
+            : <>⚠ Connected but found <strong>0 products</strong>. The page may require JavaScript.</>}
         </div>
       )}
-
       <div className="flex gap-2 justify-end">
-        <button onClick={onClose} className="px-4 py-2 rounded-lg border text-sm text-gray-600 hover:bg-gray-50">Cancel</button>
-        <button onClick={handleImport} disabled={loading || !url.trim()}
-          className="px-4 py-2 rounded-lg bg-gray-900 text-white text-sm font-semibold disabled:opacity-50 flex items-center gap-2">
-          {loading && <Spinner />}
-          {loading ? "Importing…" : "Import"}
+        <button onClick={onClose} style={S.btnOutline} className="px-4 py-2 rounded-lg text-sm">Cancel</button>
+        <button onClick={handleImport} disabled={loading || !url.trim()} style={S.btnDark}
+          className="px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 flex items-center gap-2">
+          {loading && <Spinner />}{loading ? "Importing…" : "Import"}
         </button>
       </div>
     </Modal>
@@ -360,13 +334,7 @@ function ImportUrlModal({
 // ADD PRODUCT
 // ─────────────────────────────────────────────────────────────────────────────
 
-function AddProductModal({
-  onClose,
-  onSuccess,
-}: {
-  onClose: () => void;
-  onSuccess: () => void;
-}) {
+function AddProductModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
   const [form, setForm] = useState({
     title: "", description: "", sku: "",
     price_amount: "", price_currency: "KES", image_url: "",
@@ -374,10 +342,7 @@ function AddProductModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  function set(field: string, value: string) {
-    setForm((p) => ({ ...p, [field]: value }));
-    setError("");
-  }
+  function set(field: string, value: string) { setForm((p) => ({ ...p, [field]: value })); setError(""); }
 
   async function handleAdd() {
     if (!form.title.trim()) { setError("Product title is required."); return; }
@@ -395,9 +360,7 @@ function AddProductModal({
       onSuccess(); onClose();
     } catch (err: any) {
       setError(err?.message || "Failed to add product.");
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   }
 
   return (
@@ -432,8 +395,9 @@ function AddProductModal({
         </Field>
         {error && <ErrorBox>{error}</ErrorBox>}
         <div className="flex gap-2 justify-end pt-2">
-          <button onClick={onClose} className={cancelBtn}>Cancel</button>
-          <button onClick={handleAdd} disabled={loading} className={primaryBtn}>
+          <button onClick={onClose} style={S.btnOutline} className="px-4 py-2 rounded-lg text-sm">Cancel</button>
+          <button onClick={handleAdd} disabled={loading} style={S.btnBlue}
+            className="px-5 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 flex items-center gap-2">
             {loading && <Spinner />}{loading ? "Adding…" : "Add Product"}
           </button>
         </div>
@@ -443,17 +407,11 @@ function AddProductModal({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// EDIT PRODUCT — opens as modal, NO page navigation
+// EDIT PRODUCT
 // ─────────────────────────────────────────────────────────────────────────────
 
-function EditProductModal({
-  product,
-  onClose,
-  onSaved,
-}: {
-  product: CatalogItem;
-  onClose: () => void;
-  onSaved: (updated: CatalogItem) => void;
+function EditProductModal({ product, onClose, onSaved }: {
+  product: CatalogItem; onClose: () => void; onSaved: (updated: CatalogItem) => void;
 }) {
   const [form, setForm] = useState({
     title: stripHtml(product.title) ?? "",
@@ -467,10 +425,7 @@ function EditProductModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  function set(field: string, value: string) {
-    setForm((p) => ({ ...p, [field]: value }));
-    setError("");
-  }
+  function set(field: string, value: string) { setForm((p) => ({ ...p, [field]: value })); setError(""); }
 
   async function handleSave() {
     if (!form.title.trim()) { setError("Title is required."); return; }
@@ -486,19 +441,15 @@ function EditProductModal({
         status: form.status,
       };
       const updated = await updateCatalogItem(product.id, payload);
-      onSaved(updated);
-      onClose();
+      onSaved(updated); onClose();
     } catch (err: any) {
       setError(err?.message || "Failed to save.");
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   }
 
   return (
     <Modal title="Edit Product" onClose={onClose} wide>
       <div className="space-y-4">
-        {/* Image preview */}
         {form.image_url && (
           <div className="flex justify-center">
             <img src={form.image_url} alt={form.title}
@@ -506,16 +457,13 @@ function EditProductModal({
               className="w-28 h-28 object-cover rounded-xl border shadow" />
           </div>
         )}
-
         <Field label="Title *">
           <input value={form.title} onChange={(e) => set("title", e.target.value)} autoFocus className={inputCls} />
         </Field>
-
         <Field label="Description">
           <textarea value={form.description} onChange={(e) => set("description", e.target.value)}
             rows={4} className={`${inputCls} resize-y`} />
         </Field>
-
         <div className="grid grid-cols-2 gap-3">
           <Field label="SKU">
             <input value={form.sku} onChange={(e) => set("sku", e.target.value)} className={inputCls} />
@@ -529,7 +477,6 @@ function EditProductModal({
             </select>
           </Field>
         </div>
-
         <Field label="Price">
           <div className="flex gap-2">
             <select value={form.price_currency} onChange={(e) => set("price_currency", e.target.value)}
@@ -540,17 +487,15 @@ function EditProductModal({
               onChange={(e) => set("price_amount", e.target.value)} className={inputCls} />
           </div>
         </Field>
-
         <Field label="Image URL">
           <input type="url" value={form.image_url}
             onChange={(e) => set("image_url", e.target.value)} className={inputCls} />
         </Field>
-
         {error && <ErrorBox>{error}</ErrorBox>}
-
         <div className="flex gap-2 justify-end pt-3 border-t mt-2">
-          <button onClick={onClose} className={cancelBtn}>Cancel</button>
-          <button onClick={handleSave} disabled={loading} className={primaryBtn}>
+          <button onClick={onClose} style={S.btnOutline} className="px-4 py-2 rounded-lg text-sm">Cancel</button>
+          <button onClick={handleSave} disabled={loading} style={S.btnBlue}
+            className="px-5 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 flex items-center gap-2">
             {loading && <Spinner />}{loading ? "Saving…" : "Save Changes"}
           </button>
         </div>
@@ -560,17 +505,11 @@ function EditProductModal({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CAPTION PREVIEW PANEL (inline expansion row)
+// CAPTION PREVIEW PANEL
 // ─────────────────────────────────────────────────────────────────────────────
 
-function CaptionPreviewPanel({
-  product,
-  templates,
-  onClose,
-}: {
-  product: CatalogItem;
-  templates: { id: string; name: string }[];
-  onClose: () => void;
+function CaptionPreviewPanel({ product, templates, onClose }: {
+  product: CatalogItem; templates: { id: string; name: string }[]; onClose: () => void;
 }) {
   const [templateId, setTemplateId] = useState(templates[0]?.id ?? "");
   const [caption, setCaption] = useState("");
@@ -585,22 +524,14 @@ function CaptionPreviewPanel({
     try {
       const payload: Record<string, string> = { product_id: product.id };
       if (templateId) payload.template_id = templateId;
-
-      // post<T>() returns T directly — no .data wrapper
       const raw = await post<unknown>("/api/v1/ai/generate", payload);
-      console.debug("[CaptionPreview] raw response:", raw); // helps debug shape
-
+      console.debug("[CaptionPreview] raw response:", raw);
       const text = extractCaption(raw);
-      if (!text) {
-        setError("The AI returned an empty response. Check the template configuration.");
-      } else {
-        setCaption(stripHtml(text));
-      }
+      if (!text) setError("The AI returned an empty response. Check the template configuration.");
+      else setCaption(stripHtml(text));
     } catch (err: any) {
       setError(err?.message || "Generation failed.");
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   }
 
   async function copy() {
@@ -608,9 +539,7 @@ function CaptionPreviewPanel({
       await navigator.clipboard.writeText(caption);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch {
-      alert("Copy failed — select text manually.");
-    }
+    } catch { alert("Copy failed — select text manually."); }
   }
 
   return (
@@ -618,65 +547,45 @@ function CaptionPreviewPanel({
       <td className="hidden md:table-cell" />
       <td colSpan={6} className="px-4 py-5">
         <div className="max-w-2xl">
-          {/* Row header */}
           <div className="flex items-center justify-between mb-3">
             <span className="text-xs font-bold text-indigo-700 uppercase tracking-wider">
               ✨ Caption Preview
               <span className="ml-2 font-normal text-gray-500 normal-case">— {stripHtml(product.title)}</span>
             </span>
-            <button
-              onClick={onClose}
-              className="text-xs border border-gray-300 text-gray-500 hover:text-gray-800 hover:border-gray-400 px-3 py-1 rounded-full transition"
-            >
+            <button onClick={onClose} style={S.btnOutline}
+              className="text-xs px-3 py-1 rounded-full transition">
               ✕ Close
             </button>
           </div>
-
-          {/* Controls */}
           <div className="flex flex-wrap items-center gap-2 mb-3">
             <label className="text-xs font-semibold text-gray-600 whitespace-nowrap">Template:</label>
-            <select
-              value={templateId}
+            <select value={templateId}
               onChange={(e) => { setTemplateId(e.target.value); setCaption(""); setError(""); }}
-              className="border rounded-lg px-3 py-1.5 text-xs flex-1 min-w-[140px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
-            >
+              className="border rounded-lg px-3 py-1.5 text-xs flex-1 min-w-[140px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400">
               {templates.length === 0
                 ? <option value="">No templates — create one first</option>
                 : templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
-            <button
-              onClick={generate}
-              disabled={loading || templates.length === 0}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50 transition flex items-center gap-1.5 whitespace-nowrap"
-            >
-              {loading && <Spinner />}
-              {loading ? "Generating…" : "Generate"}
+            <button onClick={generate} disabled={loading || templates.length === 0} style={S.btnIndigo}
+              className="px-4 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50 transition flex items-center gap-1.5 whitespace-nowrap">
+              {loading && <Spinner />}{loading ? "Generating…" : "Generate"}
             </button>
           </div>
-
-          {/* Error */}
           {error && (
-            <div className="mb-3 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-              {error}
-            </div>
+            <div className="mb-3 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>
           )}
-
-          {/* Caption output */}
           {caption && (
             <div className="space-y-2">
               <div className="bg-white border border-indigo-100 rounded-xl p-4 text-sm whitespace-pre-wrap text-gray-800 shadow-sm leading-relaxed">
                 {caption}
               </div>
-              <button
-                onClick={copy}
-                className={`text-xs px-4 py-1.5 rounded-lg font-semibold transition ${copied ? "bg-green-600 text-white" : "bg-gray-900 hover:bg-gray-700 text-white"}`}
-              >
+              <button onClick={copy}
+                style={copied ? { backgroundColor: "#16a34a", color: "#fff", border: "none" } : S.btnDark}
+                className="text-xs px-4 py-1.5 rounded-lg font-semibold transition">
                 {copied ? "✓ Copied!" : "Copy Caption"}
               </button>
             </div>
           )}
-
-          {/* Idle */}
           {!hasGenerated && !loading && (
             <p className="text-xs text-gray-400 italic">
               Choose a template and click <strong>Generate</strong> to create an AI caption.
@@ -694,10 +603,6 @@ function CaptionPreviewPanel({
 
 const inputCls =
   "w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
-const primaryBtn =
-  "px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold disabled:opacity-50 flex items-center gap-2 transition";
-const cancelBtn =
-  "px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-600 hover:bg-gray-50 transition";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -727,14 +632,14 @@ function Spinner({ className = "" }: { className?: string }) {
 
 function StatusBadge({ status }: { status?: string }) {
   const s = status?.toLowerCase();
-  const cls =
+  const style: React.CSSProperties =
     s === "active"
-      ? "bg-green-100 text-green-700"
+      ? { backgroundColor: "#dcfce7", color: "#15803d" }
       : s === "draft"
-      ? "bg-yellow-100 text-yellow-700"
-      : "bg-gray-100 text-gray-500";
+      ? { backgroundColor: "#fef9c3", color: "#a16207" }
+      : { backgroundColor: "#f3f4f6", color: "#6b7280" };
   return (
-    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${cls}`}>
+    <span style={style} className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium">
       {status || "—"}
     </span>
   );
@@ -753,26 +658,18 @@ export default function Catalog() {
   const [loadError, setLoadError] = useState("");
   const [dataLoading, setDataLoading] = useState(true);
 
-  // Selection
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
-
-  // Caption preview — only one open at a time
   const [openPreviewId, setOpenPreviewId] = useState<string | null>(null);
-
-  // Edit modal
   const [editingProduct, setEditingProduct] = useState<CatalogItem | null>(null);
 
-  // Ingestion modals
   const [showBulkUpload, setShowBulkUpload] = useState(false);
   const [showImportUrl, setShowImportUrl] = useState(false);
   const [showAddProduct, setShowAddProduct] = useState(false);
 
-  // Pagination
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
 
-  // ── Derived (declared before handlers that use them) ───────────────────────
   const filtered = products.filter((p) => {
     const q = search.toLowerCase();
     return (
@@ -791,9 +688,6 @@ export default function Catalog() {
   const someOnPageSelected = paginated.some((p) => selected.has(p.id)) && !allOnPageSelected;
 
   useEffect(() => { setPage(1); }, [search, pageSize]);
-
-  // ─── Data loading ──────────────────────────────────────────────────────────
-
   useEffect(() => { loadData(); }, []);
 
   async function loadData() {
@@ -812,33 +706,17 @@ export default function Catalog() {
     }
   }
 
-  // ─── Selection ─────────────────────────────────────────────────────────────
-
   function toggleSelect(id: string) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
+    setSelected((prev) => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
   }
 
   function toggleSelectAll() {
     if (allOnPageSelected) {
-      setSelected((prev) => {
-        const next = new Set(prev);
-        paginated.forEach((p) => next.delete(p.id));
-        return next;
-      });
+      setSelected((prev) => { const next = new Set(prev); paginated.forEach((p) => next.delete(p.id)); return next; });
     } else {
-      setSelected((prev) => {
-        const next = new Set(prev);
-        paginated.forEach((p) => next.add(p.id));
-        return next;
-      });
+      setSelected((prev) => { const next = new Set(prev); paginated.forEach((p) => next.add(p.id)); return next; });
     }
   }
-
-  // ─── Delete ────────────────────────────────────────────────────────────────
 
   async function handleBulkDelete() {
     if (!selected.size) return;
@@ -862,14 +740,10 @@ export default function Catalog() {
     } catch (err: any) { alert(err?.message || "Delete failed."); }
   }
 
-  // ─── Pagination bar ────────────────────────────────────────────────────────
-
   function PaginationBar() {
     if (filtered.length <= pageSize && totalPages <= 1) return null;
-
     const makeRange = (): (number | "…")[] => {
-      const delta = 2;
-      const result: (number | "…")[] = [];
+      const delta = 2; const result: (number | "…")[] = [];
       const left = Math.max(2, safePage - delta);
       const right = Math.min(totalPages - 1, safePage + delta);
       result.push(1);
@@ -879,52 +753,40 @@ export default function Catalog() {
       if (totalPages > 1) result.push(totalPages);
       return result;
     };
-
     const btnBase = "px-3 py-1.5 rounded-lg border text-xs font-medium transition";
-    const btnActive = `${btnBase} bg-gray-900 text-white border-gray-900`;
-    const btnIdle = `${btnBase} text-gray-600 hover:bg-gray-100`;
-    const btnDisabled = `${btnBase} text-gray-300 cursor-not-allowed`;
-
     return (
       <div className="flex flex-wrap items-center justify-between gap-3 mt-4 px-1">
         <div className="flex items-center gap-2 text-xs text-gray-500">
           <span>Show</span>
-          <select value={pageSize}
-            onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
+          <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
             className="border rounded-lg px-2 py-1 text-xs bg-white focus:outline-none">
             {PAGE_SIZE_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
           </select>
           <span>per page · <strong>{filtered.length}</strong> total</span>
         </div>
-
         <div className="flex items-center gap-1 flex-wrap">
           <button onClick={() => setPage(1)} disabled={safePage === 1}
-            className={safePage === 1 ? btnDisabled : btnIdle}>«</button>
+            style={safePage === 1 ? { color: "#d1d5db" } : S.btnOutline} className={btnBase}>«</button>
           <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={safePage === 1}
-            className={safePage === 1 ? btnDisabled : btnIdle}>‹</button>
-
+            style={safePage === 1 ? { color: "#d1d5db" } : S.btnOutline} className={btnBase}>‹</button>
           {makeRange().map((r, i) =>
             r === "…"
               ? <span key={`e${i}`} className="px-1.5 text-gray-400 text-xs select-none">…</span>
               : <button key={r} onClick={() => setPage(r as number)}
-                  className={safePage === r ? btnActive : btnIdle}>{r}</button>
+                  style={safePage === r ? S.btnDark : S.btnOutline} className={btnBase}>{r}</button>
           )}
-
           <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={safePage === totalPages}
-            className={safePage === totalPages ? btnDisabled : btnIdle}>›</button>
+            style={safePage === totalPages ? { color: "#d1d5db" } : S.btnOutline} className={btnBase}>›</button>
           <button onClick={() => setPage(totalPages)} disabled={safePage === totalPages}
-            className={safePage === totalPages ? btnDisabled : btnIdle}>»</button>
+            style={safePage === totalPages ? { color: "#d1d5db" } : S.btnOutline} className={btnBase}>»</button>
         </div>
       </div>
     );
   }
 
-  // ─── Render ────────────────────────────────────────────────────────────────
-
   return (
     <div className="p-4 sm:p-6 max-w-screen-xl mx-auto">
 
-      {/* ── MODALS ── */}
       {showBulkUpload && <BulkUploadModal onClose={() => setShowBulkUpload(false)} onSuccess={loadData} />}
       {showImportUrl && <ImportUrlModal onClose={() => setShowImportUrl(false)} onSuccess={loadData} />}
       {showAddProduct && <AddProductModal onClose={() => setShowAddProduct(false)} onSuccess={loadData} />}
@@ -939,7 +801,7 @@ export default function Catalog() {
         />
       )}
 
-      {/* ── HEADER ── */}
+      {/* HEADER */}
       <div className="flex flex-col sm:flex-row sm:items-center gap-4 justify-between mb-6">
         <div>
           <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-0.5">POSTIKA</p>
@@ -947,30 +809,37 @@ export default function Catalog() {
           <p className="text-gray-400 text-sm mt-0.5">Manage tenant products.</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button onClick={() => setShowBulkUpload(true)}
-            className="flex-1 sm:flex-none bg-gray-800 hover:bg-gray-700 text-white px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold transition whitespace-nowrap">
+          <button
+            onClick={() => setShowBulkUpload(true)}
+            style={S.btnDark}
+            className="flex-1 sm:flex-none px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold transition whitespace-nowrap"
+          >
             📦 Bulk Upload ZIP
           </button>
-          <button onClick={() => setShowImportUrl(true)}
-            className="flex-1 sm:flex-none bg-gray-800 hover:bg-gray-700 text-white px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold transition whitespace-nowrap">
+          <button
+            onClick={() => setShowImportUrl(true)}
+            style={S.btnDark}
+            className="flex-1 sm:flex-none px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold transition whitespace-nowrap"
+          >
             🌐 Import URL
           </button>
-          <button onClick={() => setShowAddProduct(true)}
-            className="flex-1 sm:flex-none bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold transition whitespace-nowrap">
+          <button
+            onClick={() => setShowAddProduct(true)}
+            style={S.btnBlue}
+            className="flex-1 sm:flex-none px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold transition whitespace-nowrap"
+          >
             + Add Product
           </button>
         </div>
       </div>
 
-      {/* ── ERROR BANNER ── */}
       {loadError && (
         <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700 flex items-center justify-between">
           ⚠ {loadError}
-          <button onClick={loadData} className="underline text-xs font-bold ml-4">Retry</button>
+          <button onClick={loadData} style={S.btnOutline} className="underline text-xs font-bold ml-4 px-2 py-1 rounded">Retry</button>
         </div>
       )}
 
-      {/* ── SEARCH + BULK DELETE ── */}
       <div className="flex flex-col sm:flex-row gap-2 mb-4">
         <div className="relative flex-1">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">🔍</span>
@@ -979,27 +848,24 @@ export default function Catalog() {
             className="w-full border rounded-xl pl-9 pr-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
         </div>
         {selected.size > 0 && (
-          <button onClick={handleBulkDelete} disabled={bulkDeleting}
-            className="bg-red-600 hover:bg-red-700 text-white px-4 py-2.5 rounded-xl text-sm font-semibold disabled:opacity-50 whitespace-nowrap flex items-center gap-2 transition">
-            {bulkDeleting && <Spinner />}
-            🗑 Delete {selected.size} selected
+          <button onClick={handleBulkDelete} disabled={bulkDeleting} style={S.btnRed}
+            className="px-4 py-2.5 rounded-xl text-sm font-semibold disabled:opacity-50 whitespace-nowrap flex items-center gap-2 transition">
+            {bulkDeleting && <Spinner />}🗑 Delete {selected.size} selected
           </button>
         )}
       </div>
 
-      {/* ── LOADING ── */}
       {dataLoading && (
         <div className="flex items-center justify-center py-20 text-gray-400 gap-3 text-sm">
           <Spinner className="h-5 w-5" /> Loading catalog…
         </div>
       )}
 
-      {/* ── TABLE / CARDS ── */}
       {!dataLoading && (
         <>
           <div className="border rounded-2xl overflow-hidden shadow-sm bg-white">
 
-            {/* ── MOBILE CARDS (< md) ── */}
+            {/* MOBILE CARDS */}
             <div className="md:hidden divide-y">
               {paginated.length === 0 && (
                 <div className="p-10 text-center text-gray-400 text-sm">
@@ -1012,8 +878,7 @@ export default function Catalog() {
                 return (
                   <div key={product.id} className={`p-4 ${isChecked ? "bg-red-50" : ""}`}>
                     <div className="flex items-start gap-3">
-                      <input type="checkbox" checked={isChecked}
-                        onChange={() => toggleSelect(product.id)}
+                      <input type="checkbox" checked={isChecked} onChange={() => toggleSelect(product.id)}
                         className="accent-red-500 mt-1 cursor-pointer shrink-0" />
                       {product.image_url
                         ? <img src={product.image_url} alt={stripHtml(product.title)}
@@ -1029,13 +894,15 @@ export default function Catalog() {
                         </div>
                         <div className="flex gap-1.5 mt-2 flex-wrap">
                           <button onClick={() => setOpenPreviewId(isOpen ? null : product.id)}
-                            className={`text-xs px-2.5 py-1 rounded-lg border font-medium transition ${isOpen ? "bg-indigo-600 text-white border-indigo-600" : "bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100"}`}>
+                            style={isOpen ? S.btnIndigo : S.btnIndigoOutline}
+                            className="text-xs px-2.5 py-1 rounded-lg font-medium transition">
                             {isOpen ? "Hide" : "✨ Caption"}
                           </button>
-                          <button onClick={() => setEditingProduct(product)}
-                            className="text-xs border border-gray-300 text-gray-700 px-2.5 py-1 rounded-lg hover:bg-gray-50 transition font-medium">Edit</button>
+                          <button onClick={() => setEditingProduct(product)} style={S.btnOutline}
+                            className="text-xs px-2.5 py-1 rounded-lg font-medium transition">Edit</button>
                           <button onClick={() => handleDelete(product.id)}
-                            className="text-xs border border-red-300 text-red-600 px-2.5 py-1 rounded-lg hover:bg-red-50 transition font-medium">Delete</button>
+                            style={{ backgroundColor: "#fff", color: "#dc2626", border: "1px solid #fca5a5" }}
+                            className="text-xs px-2.5 py-1 rounded-lg font-medium transition">Delete</button>
                         </div>
                       </div>
                     </div>
@@ -1044,7 +911,7 @@ export default function Catalog() {
               })}
             </div>
 
-            {/* ── DESKTOP TABLE (md+) ── */}
+            {/* DESKTOP TABLE */}
             <table className="hidden md:table w-full text-sm">
               <thead className="bg-gray-50 border-b">
                 <tr>
@@ -1068,24 +935,18 @@ export default function Catalog() {
                     </td>
                   </tr>
                 )}
-
                 {paginated.map((product) => {
                   const isChecked = selected.has(product.id);
                   const isOpen = openPreviewId === product.id;
                   const cleanTitle = stripHtml(product.title);
                   const cleanDesc = stripHtml(product.description);
-
                   return (
                     <Fragment key={product.id}>
                       <tr className={`border-b transition-colors ${isChecked ? "bg-red-50" : "hover:bg-gray-50/70"}`}>
-                        {/* Checkbox */}
                         <td className="p-3">
-                          <input type="checkbox" checked={isChecked}
-                            onChange={() => toggleSelect(product.id)}
+                          <input type="checkbox" checked={isChecked} onChange={() => toggleSelect(product.id)}
                             className="accent-red-500 cursor-pointer" />
                         </td>
-
-                        {/* Product */}
                         <td className="p-3">
                           <div className="flex items-center gap-3">
                             {product.image_url
@@ -1094,52 +955,32 @@ export default function Catalog() {
                                   onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
                               : <div className="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center text-gray-300 text-xs shrink-0">IMG</div>}
                             <div className="min-w-0">
-                              {/* ✅ cleanTitle — stripHtml applied to title field */}
                               <p className="font-semibold text-gray-900 truncate max-w-[240px] leading-snug">{cleanTitle}</p>
                               <p className="text-xs text-gray-400 line-clamp-1 max-w-[260px] mt-0.5">{cleanDesc}</p>
                             </div>
                           </div>
                         </td>
-
-                        {/* SKU */}
                         <td className="p-3 text-gray-500 text-xs hidden lg:table-cell">{product.sku || "—"}</td>
-
-                        {/* Price */}
                         <td className="p-3 font-semibold text-gray-900">{formatPrice(product)}</td>
-
-                        {/* Status */}
                         <td className="p-3"><StatusBadge status={product.status} /></td>
-
-                        {/* Actions */}
                         <td className="p-3">
                           <div className="flex items-center gap-1.5 flex-wrap">
-                            <button
-                              onClick={() => setOpenPreviewId(isOpen ? null : product.id)}
-                              className={`text-xs px-2.5 py-1.5 rounded-lg border font-medium transition ${isOpen ? "bg-indigo-600 text-white border-indigo-600" : "bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100"}`}>
+                            <button onClick={() => setOpenPreviewId(isOpen ? null : product.id)}
+                              style={isOpen ? S.btnIndigo : S.btnIndigoOutline}
+                              className="text-xs px-2.5 py-1.5 rounded-lg font-medium transition">
                               {isOpen ? "Hide" : "✨ Caption"}
                             </button>
-                            {/* ✅ Edit opens modal — NOT window.location.href */}
-                            <button
-                              onClick={() => setEditingProduct(product)}
-                              className="text-xs border border-gray-300 text-gray-700 px-2.5 py-1.5 rounded-lg hover:bg-gray-50 transition font-medium">
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => handleDelete(product.id)}
-                              className="text-xs border border-red-300 text-red-600 px-2.5 py-1.5 rounded-lg hover:bg-red-50 transition font-medium">
-                              Delete
-                            </button>
+                            <button onClick={() => setEditingProduct(product)} style={S.btnOutline}
+                              className="text-xs px-2.5 py-1.5 rounded-lg font-medium transition">Edit</button>
+                            <button onClick={() => handleDelete(product.id)}
+                              style={{ backgroundColor: "#fff", color: "#dc2626", border: "1px solid #fca5a5" }}
+                              className="text-xs px-2.5 py-1.5 rounded-lg font-medium transition">Delete</button>
                           </div>
                         </td>
                       </tr>
-
-                      {/* ✅ Caption preview — toggles on/off, explicit close button */}
                       {isOpen && (
-                        <CaptionPreviewPanel
-                          product={product}
-                          templates={templates}
-                          onClose={() => setOpenPreviewId(null)}
-                        />
+                        <CaptionPreviewPanel product={product} templates={templates}
+                          onClose={() => setOpenPreviewId(null)} />
                       )}
                     </Fragment>
                   );
@@ -1148,10 +989,8 @@ export default function Catalog() {
             </table>
           </div>
 
-          {/* ── PAGINATION ── */}
           <PaginationBar />
 
-          {/* ── FOOTER ── */}
           <p className="text-xs text-gray-400 mt-2">
             Showing {paginated.length > 0 ? `${pageStart + 1}–${pageStart + paginated.length}` : "0"} of{" "}
             {filtered.length} product{filtered.length !== 1 ? "s" : ""}

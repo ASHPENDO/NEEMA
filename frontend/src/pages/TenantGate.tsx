@@ -11,7 +11,6 @@ function safeInternalPath(p: string | null | undefined): string | null {
   if (!p) return null;
   const v = String(p).trim();
   if (!v) return null;
-  // only allow internal paths
   if (v.startsWith("/") && !v.startsWith("//")) return v;
   return null;
 }
@@ -24,30 +23,23 @@ export default function TenantGate() {
   const { isBootstrapping, isAuthed, me, logout } = useAuth();
   const [error, setError] = useState<string | null>(null);
 
-  // Intended destination priority:
-  // 1) ?next=/somewhere (explicit)
-  // 2) location.state.from (from RequirePermissions redirects)
   const intended = useMemo(() => {
     const nextQ = safeInternalPath(params.get("next"));
     if (nextQ) return nextQ;
-
     const fromState = safeInternalPath((loc.state as any)?.from);
     if (fromState) return fromState;
-
     return null;
   }, [params, loc.state]);
 
   useEffect(() => {
     if (isBootstrapping) return;
 
-    // Not logged in -> login (preserve intended route)
     if (!isAuthed) {
       const next = encodeURIComponent(intended ?? "/tenant-gate");
       nav(`/login?next=${next}`, { replace: true });
       return;
     }
 
-    // Logged in but profile incomplete -> profile completion (preserve intended route)
     if (!isProfileComplete(me)) {
       const next = encodeURIComponent(intended ?? "/tenant-gate");
       nav(`/profile-completion?next=${next}`, { replace: true });
@@ -56,31 +48,42 @@ export default function TenantGate() {
 
     (async () => {
       try {
-        // Always load tenants to validate/repair activeTenantId
+        // ── FAST PATH ──────────────────────────────────────────────────────
+        // If we already have an active tenant in storage, trust it and
+        // navigate immediately WITHOUT waiting for the API. The membership
+        // fetch in useTenantMembership will validate it asynchronously.
+        // This prevents the race condition where the API call returns before
+        // the backend has fully indexed the new tenant, causing a false
+        // "0 tenants → go to tenant-create" redirect loop.
+        const existingBeforeFetch = activeTenantStorage.get();
+        if (existingBeforeFetch) {
+          nav(intended ?? "/dashboard", { replace: true });
+          return;
+        }
+
+        // ── SLOW PATH: no active tenant in storage, must fetch ─────────────
         const tenants = await api<TenantOut[]>("/api/v1/tenants", {
           method: "GET",
           auth: true,
         });
 
-        const existing = activeTenantStorage.get();
+        // Re-read storage — it may have been set while we were fetching
+        // (e.g. another tab or a concurrent navigation)
+        const activeAfterFetch = activeTenantStorage.get();
 
-        // If we have an active tenant but user is not actually in that tenant list, clear it.
-        if (existing && !tenants.some((t) => t.id === existing)) {
+        // Validate: if stored tenant is not in the fetched list, clear it
+        if (activeAfterFetch && !tenants.some((t) => t.id === activeAfterFetch)) {
           activeTenantStorage.clear();
         }
 
-        // Re-read after potential clear
         const active = activeTenantStorage.get();
 
-        // If already have a valid active tenant, proceed to intended or dashboard
         if (active) {
           nav(intended ?? "/dashboard", { replace: true });
           return;
         }
 
         if (tenants.length === 0) {
-          // After create tenant, app will set active tenant then route;
-          // we preserve intended by passing next along.
           const next = intended ? `?next=${encodeURIComponent(intended)}` : "";
           nav(`/tenant-create${next}`, { replace: true });
           return;
@@ -92,19 +95,17 @@ export default function TenantGate() {
           return;
         }
 
-        // Multiple tenants -> selection page (preserve intended)
+        // Multiple tenants → selection
         const next = intended ? `?next=${encodeURIComponent(intended)}` : "";
         nav(`/tenant-selection${next}`, { replace: true });
       } catch (e) {
         if (e instanceof ApiError) {
-          // Token expired/invalid (or backend rejected auth)
           if (e.status === 401 || e.status === 403) {
             logout();
             const next = encodeURIComponent(intended ?? "/tenant-gate");
             nav(`/login?next=${next}`, { replace: true });
             return;
           }
-
           setError(e.message);
         } else {
           setError("Could not load tenants. Try again.");

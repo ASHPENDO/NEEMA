@@ -3,11 +3,30 @@ import React from "react";
 
 type ButtonVariant = "primary" | "secondary" | "danger";
 
-interface ButtonProps
-  extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   loading?: boolean;
   variant?: ButtonVariant;
 }
+
+// Inline style fallbacks — guarantee visibility even if Tailwind
+// fails to generate the class in v4's CSS scanner pass.
+const INLINE_STYLES: Record<ButtonVariant, React.CSSProperties> = {
+  primary: {
+    backgroundColor: "#0f172a",  // slate-900
+    color: "#ffffff",
+    borderColor: "transparent",
+  },
+  secondary: {
+    backgroundColor: "#ffffff",
+    color: "#374151",             // slate-700 approx
+    borderColor: "#e2e8f0",      // slate-200
+  },
+  danger: {
+    backgroundColor: "#ffffff",
+    color: "#dc2626",            // red-600
+    borderColor: "#fecaca",      // red-200
+  },
+};
 
 export function Button({
   children,
@@ -16,20 +35,19 @@ export function Button({
   className = "",
   disabled,
   type = "button",
+  style,
   ...props
 }: ButtonProps) {
   const base =
     "inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-semibold transition-all " +
     "disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1";
 
-  const styles: Record<ButtonVariant, string> = {
-    primary:
-      "bg-slate-900 text-white hover:bg-slate-700 focus-visible:ring-slate-900 shadow-sm",
-    secondary:
-      "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 hover:border-slate-300 focus-visible:ring-slate-400 shadow-sm",
-    danger:
-      "bg-white text-red-600 border border-red-200 hover:bg-red-50 hover:border-red-300 focus-visible:ring-red-400 shadow-sm",
-  };
+  const variantClass =
+    variant === "primary"
+      ? "bg-slate-900 text-white border border-transparent hover:bg-slate-700 focus-visible:ring-slate-900 shadow-sm"
+      : variant === "danger"
+      ? "bg-white text-red-600 border border-red-200 hover:bg-red-50 hover:border-red-300 focus-visible:ring-red-400 shadow-sm"
+      : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 hover:border-slate-300 focus-visible:ring-slate-400 shadow-sm";
 
   return (
     <button
@@ -37,7 +55,9 @@ export function Button({
       type={type}
       disabled={disabled || loading}
       aria-busy={loading || undefined}
-      className={[base, styles[variant], className].join(" ").trim()}
+      // Merge inline styles: variant defaults first, then caller overrides
+      style={{ ...INLINE_STYLES[variant], ...style }}
+      className={[base, variantClass, className].join(" ").trim()}
     >
       {loading ? (
         <span className="flex items-center gap-2">

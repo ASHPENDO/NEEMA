@@ -28,6 +28,45 @@ type AIResult = {
   full_caption: string;
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// INLINE STYLE CONSTANTS — bypass Tailwind v4 scanning entirely
+// ─────────────────────────────────────────────────────────────────────────────
+
+const S: Record<string, React.CSSProperties> = {
+  btnDark: {
+    backgroundColor: "#111827",  // gray-900
+    color: "#ffffff",
+    border: "none",
+  },
+  btnDarkDisabled: {
+    backgroundColor: "#d1d5db",  // gray-300
+    color: "#ffffff",
+    border: "none",
+    cursor: "not-allowed",
+  },
+  btnIndigo: {
+    backgroundColor: "#4f46e5",  // indigo-600
+    color: "#ffffff",
+    border: "none",
+  },
+  btnIndigoDisabled: {
+    backgroundColor: "#a5b4fc",  // indigo-300
+    color: "#ffffff",
+    border: "none",
+    cursor: "not-allowed",
+  },
+  btnOutline: {
+    backgroundColor: "#ffffff",
+    color: "#374151",
+    border: "1px solid #d1d5db",
+  },
+  btnRedSmall: {
+    backgroundColor: "#ef4444",  // red-500
+    color: "#ffffff",
+    border: "none",
+  },
+};
+
 function stripHtml(raw?: string | null): string {
   if (!raw) return "";
   return raw
@@ -77,9 +116,9 @@ export default function CreateCampaign() {
   const [productSearch, setProductSearch] = useState("");
 
   // ── AI state ──────────────────────────────────────────────────────────────
-  const [aiResult,    setAiResult]    = useState<AIResult | null>(null);
+  const [aiResult,     setAiResult]     = useState<AIResult | null>(null);
   const [finalCaption, setFinalCaption] = useState("");
-  const [aiLoading,   setAiLoading]   = useState(false);
+  const [aiLoading,    setAiLoading]    = useState(false);
 
   // ── Submit ────────────────────────────────────────────────────────────────
   const [submitting, setSubmitting] = useState(false);
@@ -94,7 +133,6 @@ export default function CreateCampaign() {
     return !q || stripHtml(p.title).toLowerCase().includes(q) || (p.sku ?? "").toLowerCase().includes(q);
   });
 
-  // ✅ Currency-aware price preview for first selected product
   const previewPrice = selectedProducts[0]
     ? formatPricePsychology(
         Number(selectedProducts[0].price_amount),
@@ -132,7 +170,6 @@ export default function CreateCampaign() {
     setSelectedProductIds((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
     );
-    // Clear AI result when selection changes
     setAiResult(null);
     setFinalCaption("");
   }
@@ -143,7 +180,7 @@ export default function CreateCampaign() {
     setFinalCaption("");
   }
 
-  // ── AI Generate (full) ────────────────────────────────────────────────────
+  // ── AI Generate ───────────────────────────────────────────────────────────
   async function handleGenerateAI() {
     if (!canGenerate) return;
     try {
@@ -151,28 +188,24 @@ export default function CreateCampaign() {
       setAiResult(null);
       setFinalCaption("");
 
-      // ✅ product_ids[] — not product_id
       const payload: Record<string, unknown> = { product_ids: selectedProductIds };
       if (templateId) payload.template_id = templateId;
 
       const data = await post<unknown>("/api/v1/ai/generate", payload);
 
-      // Build AIResult from whatever shape the backend returns.
-      // Backend may wrap as: { success: true, data: { hook, body, cta, ... } }
       let result: AIResult;
 
-      // Unwrap envelope if present
-      const unwrappedpayload: unknown =
+      const unwrappedPayload: unknown =
         (data && typeof data === "object" && (data as any).data)
           ? (data as any).data
           : data;
 
-      if (unwrappedpayload && typeof unwrappedpayload === "object") {
-        const d = unwrappedpayload as Record<string, unknown>;
+      if (unwrappedPayload && typeof unwrappedPayload === "object") {
+        const d = unwrappedPayload as Record<string, unknown>;
 
-        const hook        = (d.hook  as string) ?? "";
-        const body        = (d.body  as string) ?? "";
-        const cta         = (d.cta   as string) ?? "";
+        const hook        = (d.hook as string) ?? "";
+        const body        = (d.body as string) ?? "";
+        const cta         = (d.cta  as string) ?? "";
         const hashtagsRaw = d.hashtags;
         const hashtags: string[] = Array.isArray(hashtagsRaw)
           ? hashtagsRaw.map(String)
@@ -188,8 +221,8 @@ export default function CreateCampaign() {
           "";
 
         result = { hook, body, cta, hashtags, full_caption };
-      } else if (typeof payload === "string") {
-        result = { hook: "", body: "", cta: "", hashtags: [], full_caption: payload };
+      } else if (typeof data === "string") {
+        result = { hook: "", body: "", cta: "", hashtags: [], full_caption: data };
       } else {
         alert("AI returned an unexpected response. Check the browser console.");
         console.error("[AI] Unexpected shape:", data);
@@ -212,12 +245,12 @@ export default function CreateCampaign() {
     try {
       setSubmitting(true);
       await post("/api/v1/campaigns", {
-        caption:      finalCaption.trim(),
-        product_ids:  selectedProductIds,
-        template_id:  templateId,
-        page_ids:     [pageId],
-        platforms:    [selectedPage?.platform ?? "facebook"],
-        media_urls:   selectedProducts.map((p) => p.image_url).filter(Boolean),
+        caption:     finalCaption.trim(),
+        product_ids: selectedProductIds,
+        template_id: templateId,
+        page_ids:    [pageId],
+        platforms:   [selectedPage?.platform ?? "facebook"],
+        media_urls:  selectedProducts.map((p) => p.image_url).filter(Boolean),
       });
       navigate("/campaigns");
     } catch (err: any) {
@@ -253,15 +286,19 @@ export default function CreateCampaign() {
       {dataError && (
         <div className="mb-5 p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700 flex items-center justify-between">
           ⚠ {dataError}
-          <button onClick={loadAll} className="underline font-bold text-xs ml-4">Retry</button>
+          <button
+            onClick={loadAll}
+            style={S.btnOutline}
+            className="underline font-bold text-xs ml-4 px-2 py-1 rounded"
+          >
+            Retry
+          </button>
         </div>
       )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
 
-        {/* ═══════════════════════════════════════════════════
-            STEP 1 — SELECT PRODUCTS (multi)
-        ═══════════════════════════════════════════════════ */}
+        {/* ═══ STEP 1 — SELECT PRODUCTS ═══ */}
         <section className="border rounded-2xl overflow-hidden shadow-sm">
           <div className="bg-gray-50 border-b px-4 py-3 flex items-center justify-between">
             <div>
@@ -271,7 +308,10 @@ export default function CreateCampaign() {
               <p className="text-xs text-gray-400 mt-0.5">Click to add or remove. Multiple allowed.</p>
             </div>
             {selectedProductIds.length > 0 && (
-              <span className="bg-blue-600 text-white text-xs font-bold px-2.5 py-1 rounded-full">
+              <span
+                style={{ backgroundColor: "#2563eb", color: "#fff" }}
+                className="text-xs font-bold px-2.5 py-1 rounded-full"
+              >
                 {selectedProductIds.length} selected
               </span>
             )}
@@ -304,11 +344,11 @@ export default function CreateCampaign() {
                       key={product.id}
                       type="button"
                       onClick={() => toggleProduct(product.id)}
-                      className={`flex items-center gap-3 p-3 rounded-xl border-2 text-left transition w-full ${
-                        isSelected
-                          ? "border-blue-500 bg-blue-50 shadow-sm"
-                          : "border-gray-200 hover:border-blue-300 hover:bg-gray-50"
-                      }`}
+                      style={isSelected
+                        ? { borderColor: "#3b82f6", backgroundColor: "#eff6ff" }
+                        : { borderColor: "#e5e7eb", backgroundColor: "#ffffff" }
+                      }
+                      className="flex items-center gap-3 p-3 rounded-xl border-2 text-left transition w-full"
                     >
                       {product.image_url ? (
                         <img
@@ -321,16 +361,18 @@ export default function CreateCampaign() {
                         <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center text-gray-300 text-xs shrink-0">IMG</div>
                       )}
                       <div className="flex-1 min-w-0">
-                        <p className={`text-sm font-semibold truncate ${isSelected ? "text-blue-800" : "text-gray-800"}`}>
+                        <p className="text-sm font-semibold truncate" style={{ color: isSelected ? "#1e40af" : "#1f2937" }}>
                           {stripHtml(product.title)}
                         </p>
-                        {/* ✅ formatPrice with currency */}
                         <p className="text-xs text-gray-400 mt-0.5">
                           {formatPrice(Number(product.price_amount), product.price_currency ?? "KES")}
                         </p>
                       </div>
                       {isSelected && (
-                        <div className="w-5 h-5 rounded-full bg-blue-600 flex items-center justify-center shrink-0">
+                        <div
+                          style={{ backgroundColor: "#2563eb" }}
+                          className="w-5 h-5 rounded-full flex items-center justify-center shrink-0"
+                        >
                           <svg className="w-3 h-3 text-white" viewBox="0 0 20 20" fill="currentColor">
                             <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                           </svg>
@@ -347,22 +389,17 @@ export default function CreateCampaign() {
           )}
         </section>
 
-        {/* ═══════════════════════════════════════════════════
-            SELECTED PRODUCTS PREVIEW GRID
-        ═══════════════════════════════════════════════════ */}
+        {/* ═══ SELECTED PRODUCTS PREVIEW ═══ */}
         {selectedProducts.length > 0 && (
           <section>
             <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">
               Selected Products Preview
             </h2>
-
-            {/* ✅ Currency-aware price psychology preview */}
             {previewPrice && (
-              <div className="text-sm text-indigo-600 font-medium mb-2">
+              <div className="text-sm font-medium mb-2" style={{ color: "#4f46e5" }}>
                 {previewPrice}
               </div>
             )}
-
             <div className="flex gap-3 flex-wrap">
               {selectedProducts.map((p) => (
                 <div
@@ -388,7 +425,8 @@ export default function CreateCampaign() {
                   <button
                     type="button"
                     onClick={() => removeProduct(p.id)}
-                    className="absolute top-1 right-1 w-5 h-5 rounded-full bg-red-500 text-white text-xs font-bold hidden group-hover:flex items-center justify-center shadow transition"
+                    style={S.btnRedSmall}
+                    className="absolute top-1 right-1 w-5 h-5 rounded-full text-xs font-bold hidden group-hover:flex items-center justify-center shadow transition"
                     title="Remove"
                   >
                     ✕
@@ -396,11 +434,9 @@ export default function CreateCampaign() {
                 </div>
               ))}
             </div>
-
-            {/* ✅ UX communication — tell user what AI will inject automatically */}
             <div className="mt-3 flex items-start gap-2 bg-indigo-50 border border-indigo-100 rounded-xl px-4 py-3">
-              <span className="text-indigo-400 text-base mt-0.5 shrink-0">ℹ️</span>
-              <p className="text-xs text-indigo-700 leading-relaxed">
+              <span className="text-base mt-0.5 shrink-0">ℹ️</span>
+              <p className="text-xs leading-relaxed" style={{ color: "#3730a3" }}>
                 <strong>Product descriptions, pricing, location, and contact details</strong> are
                 automatically injected into the AI caption — you don't need to add them manually.
                 Just click <strong>Generate</strong> below.
@@ -409,9 +445,7 @@ export default function CreateCampaign() {
           </section>
         )}
 
-        {/* ═══════════════════════════════════════════════════
-            STEP 2 — TEMPLATE
-        ═══════════════════════════════════════════════════ */}
+        {/* ═══ STEP 2 — TEMPLATE ═══ */}
         <section>
           <label className="block text-sm font-bold text-gray-800 mb-1">
             2. Template <span className="text-red-500">*</span>
@@ -437,9 +471,7 @@ export default function CreateCampaign() {
           )}
         </section>
 
-        {/* ═══════════════════════════════════════════════════
-            STEP 3 — PAGE
-        ═══════════════════════════════════════════════════ */}
+        {/* ═══ STEP 3 — PAGE ═══ */}
         <section>
           <label className="block text-sm font-bold text-gray-800 mb-1">
             3. Page / Social Account <span className="text-red-500">*</span>
@@ -470,21 +502,19 @@ export default function CreateCampaign() {
           )}
         </section>
 
-        {/* ═══════════════════════════════════════════════════
-            STEP 4 — AI CAPTION GENERATION + EDITOR
-        ═══════════════════════════════════════════════════ */}
+        {/* ═══ STEP 4 — AI CAPTION ═══ */}
         <section>
           <label className="block text-sm font-bold text-gray-800 mb-1">
             4. AI Caption <span className="text-red-500">*</span>
           </label>
 
-          {/* Generate + Reset buttons */}
           <div className="flex gap-2 mb-3">
             <button
               type="button"
               onClick={handleGenerateAI}
               disabled={aiLoading || !canGenerate}
-              className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 disabled:cursor-not-allowed text-white px-4 py-3 rounded-xl text-sm font-bold transition flex items-center justify-center gap-2"
+              style={aiLoading || !canGenerate ? S.btnIndigoDisabled : S.btnIndigo}
+              className="flex-1 px-4 py-3 rounded-xl text-sm font-bold transition flex items-center justify-center gap-2"
             >
               {aiLoading
                 ? <><Spinner /> Generating caption…</>
@@ -495,7 +525,8 @@ export default function CreateCampaign() {
               <button
                 type="button"
                 onClick={() => { setAiResult(null); setFinalCaption(""); }}
-                className="px-4 py-3 rounded-xl border text-sm text-gray-600 hover:bg-gray-100 transition font-semibold"
+                style={S.btnOutline}
+                className="px-4 py-3 rounded-xl text-sm font-semibold transition"
               >
                 Reset
               </button>
@@ -506,7 +537,6 @@ export default function CreateCampaign() {
             <p className="text-xs text-gray-400 mb-2">Select at least one product to enable AI generation.</p>
           )}
 
-          {/* ✅ AI Editor — structured hook/body/cta with per-section regenerate */}
           {aiResult ? (
             <AIResultEditor
               result={aiResult}
@@ -518,7 +548,6 @@ export default function CreateCampaign() {
               }}
             />
           ) : (
-            /* Fallback plain textarea when no AI result yet */
             <textarea
               placeholder="AI caption will appear here after generation. You can also type manually."
               value={finalCaption}
@@ -529,9 +558,7 @@ export default function CreateCampaign() {
           )}
         </section>
 
-        {/* ═══════════════════════════════════════════════════
-            READINESS CHECKLIST
-        ═══════════════════════════════════════════════════ */}
+        {/* ═══ READINESS CHECKLIST ═══ */}
         <section className="bg-gray-50 border rounded-2xl p-4">
           <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">Ready to publish?</p>
           <div className="space-y-2">
@@ -552,19 +579,20 @@ export default function CreateCampaign() {
             ].map(({ done, label }) => (
               <div key={label} className="flex items-center gap-2 text-xs">
                 {done ? <Check /> : <Circle />}
-                <span className={done ? "text-green-700 font-medium" : "text-gray-400"}>{label}</span>
+                <span style={{ color: done ? "#15803d" : "#9ca3af", fontWeight: done ? 500 : 400 }}>
+                  {label}
+                </span>
               </div>
             ))}
           </div>
         </section>
 
-        {/* ═══════════════════════════════════════════════════
-            SUBMIT
-        ═══════════════════════════════════════════════════ */}
+        {/* ═══ SUBMIT ═══ */}
         <button
           type="submit"
           disabled={submitting || !canSubmit}
-          className="w-full bg-gray-900 hover:bg-gray-800 disabled:bg-gray-300 disabled:cursor-not-allowed text-white px-4 py-3.5 rounded-xl font-bold text-sm transition flex items-center justify-center gap-2"
+          style={submitting || !canSubmit ? S.btnDarkDisabled : S.btnDark}
+          className="w-full px-4 py-3.5 rounded-xl font-bold text-sm transition flex items-center justify-center gap-2"
         >
           {submitting ? <><Spinner /> Creating campaign…</> : "🚀 Create Campaign"}
         </button>
