@@ -7,10 +7,14 @@ import { ApiError } from "../lib/api";
 import { normalizeOtp } from "../lib/validators";
 import { useAuth } from "../auth/AuthContext";
 
-function safeNext(nextParam: string | null): string {
-  if (!nextParam) return "/tenant-gate";
-  if (nextParam.startsWith("/") && !nextParam.startsWith("//")) return nextParam;
-  return "/tenant-gate";
+// -----------------------------
+// Helpers
+// -----------------------------
+function isProfileComplete(me: any): boolean {
+  if (!me) return false;
+
+  // Adjust based on your actual schema
+  return Boolean(me.name && me.phone_number);
 }
 
 export default function Verify() {
@@ -23,19 +27,11 @@ export default function Verify() {
     requestCode,
     verifyCode,
     setPendingInviteToken,
+    getPendingInviteToken,
+    me,
   } = useAuth();
 
   const pendingEmail = getPendingEmail();
-
-  const nextParam = useMemo(() => {
-    const n = params.get("next");
-    return n && n.trim().length > 0 ? n.trim() : null;
-  }, [params]);
-
-  const nextPath = useMemo(() => {
-    const decoded = nextParam ? decodeURIComponent(nextParam) : null;
-    return safeNext(decoded);
-  }, [nextParam]);
 
   useEffect(() => {
     const token = params.get("token");
@@ -51,9 +47,17 @@ export default function Verify() {
   const [info, setInfo] = useState<string | null>(null);
 
   const otp = useMemo(() => normalizeOtp(code), [code]);
-  const otpError =
-    code.length === 0 ? undefined : otp.length < 4 ? "Enter the code from your email." : undefined;
 
+  const otpError =
+    code.length === 0
+      ? undefined
+      : otp.length < 4
+      ? "Enter the code from your email."
+      : undefined;
+
+  // -----------------------------
+  // Verify Handler
+  // -----------------------------
   async function onVerify(e: React.FormEvent) {
     e.preventDefault();
     setServerError(null);
@@ -74,7 +78,34 @@ export default function Verify() {
     try {
       await verifyCode(pendingEmail, otp);
       clearPendingEmail();
-      nav(nextPath, { replace: true });
+
+      const pendingInvite = getPendingInviteToken();
+
+      // 1. Invitation takes priority
+      if (pendingInvite) {
+        nav(
+          `/accept-invitation?token=${encodeURIComponent(pendingInvite)}`,
+          { replace: true }
+        );
+        return;
+      }
+
+      // 2. Profile incomplete → fix first
+      if (!isProfileComplete(me)) {
+        nav("/profile-completion", { replace: true });
+        return;
+      }
+
+      // 3. Has tenant membership?
+      const hasTenant = me?.tenants && me.tenants.length > 0;
+
+      if (!hasTenant) {
+        nav("/tenant-create", { replace: true });
+        return;
+      }
+
+      // 4. Otherwise → dashboard
+      nav("/dashboard", { replace: true });
     } catch (err) {
       if (err instanceof ApiError) setServerError(err.message);
       else setServerError("Verification failed. Please try again.");
@@ -83,6 +114,9 @@ export default function Verify() {
     }
   }
 
+  // -----------------------------
+  // Resend Handler
+  // -----------------------------
   async function onResend() {
     setServerError(null);
     setInfo(null);
@@ -105,6 +139,9 @@ export default function Verify() {
     }
   }
 
+  // -----------------------------
+  // UI
+  // -----------------------------
   return (
     <PageShell
       title="Verify code"
@@ -153,7 +190,7 @@ export default function Verify() {
 
         <button
           type="button"
-          onClick={() => nav(nextParam ? `/login?next=${nextParam}` : "/login")}
+          onClick={() => nav("/login")}
           className="w-full text-sm text-slate-600 hover:text-slate-900"
         >
           Use a different email
