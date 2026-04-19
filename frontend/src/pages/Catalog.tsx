@@ -1,15 +1,14 @@
 /**
  * Catalog.tsx — POSTIKA
  *
- * Fixes applied in this version:
- *  1. stripHtml() applied to TITLES as well as descriptions (fixes "0" class=... in product names)
- *  2. Edit opens an inline modal — NO window.location.href navigation (fixes 404 /catalog/{id}/edit)
- *  3. Caption preview handles every known AI response shape + logs raw response for debugging
- *  4. Import URL uses full crawling payload (crawl_product_pages, max_product_pages, etc.)
- *  5. Pagination: 25/50/100/150, NEMIS-style page buttons with ellipsis
- *  6. Mobile-first responsive layout (card view on small screens, table on md+)
- *  7. HTML entities decoded everywhere before display/storage
- *  8. Inline styles on all action buttons — guarantees visibility in Tailwind v4
+ * Fixes in this version:
+ *  1. Bulk selection checkboxes use inline styles (accent color guaranteed)
+ *  2. SKU column always visible (removed lg:table-cell hiding)
+ *  3. Description displays with inline overflow style (no line-clamp Tailwind dependency)
+ *  4. PaginationBar moved outside main component to prevent remount on every render
+ *  5. JS warning banner removed from ImportUrlModal
+ *  6. URL placeholder updated to postika.co.ke
+ *  7. All action buttons use inline styles (Tailwind v4 safe)
  */
 
 import { useState, useEffect, useRef, Fragment } from "react";
@@ -82,81 +81,38 @@ function formatPrice(item: CatalogItem): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// INLINE STYLE CONSTANTS — bypass Tailwind v4 scanning entirely
+// INLINE STYLE CONSTANTS
 // ─────────────────────────────────────────────────────────────────────────────
 
-const S = {
-  btnDark: {
-    backgroundColor: "#1f2937",  // gray-800
-    color: "#ffffff",
-    border: "none",
-  } as React.CSSProperties,
-  btnBlue: {
-    backgroundColor: "#2563eb",  // blue-600
-    color: "#ffffff",
-    border: "none",
-  } as React.CSSProperties,
-  btnRed: {
-    backgroundColor: "#dc2626",  // red-600
-    color: "#ffffff",
-    border: "none",
-  } as React.CSSProperties,
-  btnIndigo: {
-    backgroundColor: "#4f46e5",  // indigo-600
-    color: "#ffffff",
-    border: "none",
-  } as React.CSSProperties,
-  btnIndigoOutline: {
-    backgroundColor: "#eef2ff",  // indigo-50
-    color: "#4338ca",            // indigo-700
-    border: "1px solid #c7d2fe", // indigo-200
-  } as React.CSSProperties,
-  btnOutline: {
-    backgroundColor: "#ffffff",
-    color: "#374151",            // gray-700
-    border: "1px solid #d1d5db", // gray-300
-  } as React.CSSProperties,
-  btnYellow: {
-    backgroundColor: "#eab308",  // yellow-500
-    color: "#ffffff",
-    border: "none",
-  } as React.CSSProperties,
+const S: Record<string, React.CSSProperties> = {
+  btnDark:         { backgroundColor: "#1f2937", color: "#ffffff", border: "none" },
+  btnBlue:         { backgroundColor: "#2563eb", color: "#ffffff", border: "none" },
+  btnRed:          { backgroundColor: "#dc2626", color: "#ffffff", border: "none" },
+  btnIndigo:       { backgroundColor: "#4f46e5", color: "#ffffff", border: "none" },
+  btnIndigoOutline:{ backgroundColor: "#eef2ff", color: "#4338ca", border: "1px solid #c7d2fe" },
+  btnOutline:      { backgroundColor: "#ffffff", color: "#374151", border: "1px solid #d1d5db" },
+  btnDeleteOutline:{ backgroundColor: "#ffffff", color: "#dc2626", border: "1px solid #fca5a5" },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SHARED MODAL WRAPPER
 // ─────────────────────────────────────────────────────────────────────────────
 
-function Modal({
-  title,
-  onClose,
-  wide = false,
-  children,
-}: {
-  title: string;
-  onClose: () => void;
-  wide?: boolean;
-  children: React.ReactNode;
+function Modal({ title, onClose, wide = false, children }: {
+  title: string; onClose: () => void; wide?: boolean; children: React.ReactNode;
 }) {
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ backgroundColor: "rgba(0,0,0,0.5)" }}
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div
-        className={`bg-white rounded-2xl shadow-2xl w-full ${wide ? "max-w-2xl" : "max-w-md"} max-h-[90vh] flex flex-col`}
-      >
-        <div className="flex items-center justify-between px-6 py-4 border-b shrink-0">
-          <h2 className="text-base font-bold text-gray-900 leading-tight">{title}</h2>
-          <button
-            onClick={onClose}
-            style={S.btnOutline}
-            className="w-8 h-8 flex items-center justify-center rounded-full transition text-lg leading-none"
-          >
-            ✕
-          </button>
+      <div style={{ backgroundColor: "#fff", borderRadius: "1rem", boxShadow: "0 25px 50px rgba(0,0,0,0.25)", width: "100%", maxWidth: wide ? "42rem" : "28rem", maxHeight: "90vh", display: "flex", flexDirection: "column" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "1rem 1.5rem", borderBottom: "1px solid #e5e7eb" }}>
+          <h2 style={{ fontSize: "0.9rem", fontWeight: 700, color: "#111827", margin: 0 }}>{title}</h2>
+          <button onClick={onClose} style={{ ...S.btnOutline, width: 32, height: 32, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontSize: "1rem" }}>✕</button>
         </div>
-        <div className="overflow-y-auto flex-1 px-6 py-5">{children}</div>
+        <div style={{ overflowY: "auto", flex: 1, padding: "1.25rem 1.5rem" }}>{children}</div>
       </div>
     </div>
   );
@@ -184,49 +140,52 @@ function BulkUploadModal({ onClose, onSuccess }: { onClose: () => void; onSucces
       if (res.error_count === 0) setTimeout(onClose, 1800);
     } catch (err: any) {
       setError(err?.message || "Upload failed.");
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   }
 
   return (
     <Modal title="Bulk Upload ZIP" onClose={onClose}>
-      <p className="text-sm text-gray-500 mb-4">
-        Upload a ZIP containing product folders. Each folder should have images and optionally a{" "}
-        <code className="bg-gray-100 px-1 rounded text-xs">products.csv</code> or{" "}
-        <code className="bg-gray-100 px-1 rounded text-xs">products.json</code> manifest.
+      <p style={{ fontSize: "0.875rem", color: "#6b7280", marginBottom: "1rem" }}>
+        Upload a ZIP containing product folders. Each folder must contain a{" "}
+        <code style={{ backgroundColor: "#f3f4f6", padding: "0 4px", borderRadius: 4, fontSize: "0.75rem" }}>details.json</code>{" "}
+        with <code style={{ backgroundColor: "#f3f4f6", padding: "0 4px", borderRadius: 4, fontSize: "0.75rem" }}>name</code> and{" "}
+        <code style={{ backgroundColor: "#f3f4f6", padding: "0 4px", borderRadius: 4, fontSize: "0.75rem" }}>price</code> fields,
+        plus optional image files.
       </p>
+
       <div
         onClick={() => inputRef.current?.click()}
-        className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition mb-4"
+        style={{ border: "2px dashed #d1d5db", borderRadius: "0.75rem", padding: "2rem", textAlign: "center", cursor: "pointer", marginBottom: "1rem", transition: "border-color 0.2s" }}
       >
         {file ? (
           <>
-            <p className="text-2xl mb-1">📦</p>
-            <p className="font-semibold text-gray-800 text-sm">{file.name}</p>
-            <p className="text-xs text-gray-400 mt-1">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
-            <p className="text-xs text-blue-500 mt-2">Click to change file</p>
+            <p style={{ fontSize: "1.5rem", marginBottom: 4 }}>📦</p>
+            <p style={{ fontWeight: 600, fontSize: "0.875rem", color: "#111827" }}>{file.name}</p>
+            <p style={{ fontSize: "0.75rem", color: "#9ca3af", marginTop: 4 }}>{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+            <p style={{ fontSize: "0.75rem", color: "#3b82f6", marginTop: 8 }}>Click to change file</p>
           </>
         ) : (
           <>
-            <p className="text-3xl mb-2">📦</p>
-            <p className="text-gray-600 text-sm font-medium">Click to select a ZIP file</p>
-            <p className="text-gray-400 text-xs mt-1">or drag and drop here</p>
+            <p style={{ fontSize: "2rem", marginBottom: 8 }}>📦</p>
+            <p style={{ fontSize: "0.875rem", fontWeight: 500, color: "#374151" }}>Click to select a ZIP file</p>
+            <p style={{ fontSize: "0.75rem", color: "#9ca3af", marginTop: 4 }}>or drag and drop here</p>
           </>
         )}
-        <input ref={inputRef} type="file" accept=".zip" className="hidden"
+        <input ref={inputRef} type="file" accept=".zip" style={{ display: "none" }}
           onChange={(e) => { const f = e.target.files?.[0]; if (f) { setFile(f); setError(""); setResult(null); } }} />
       </div>
-      {error && <p className="text-red-600 text-sm mb-3 bg-red-50 border border-red-200 p-3 rounded-lg">{error}</p>}
+
+      {error && <p style={{ color: "#dc2626", fontSize: "0.875rem", marginBottom: "0.75rem", backgroundColor: "#fef2f2", border: "1px solid #fecaca", padding: "0.75rem", borderRadius: "0.5rem" }}>{error}</p>}
       {result && (
-        <div className={`mb-3 p-3 rounded-lg text-sm border ${result.errors > 0 ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-green-50 text-green-700 border-green-200"}`}>
+        <div style={{ marginBottom: "0.75rem", padding: "0.75rem", borderRadius: "0.5rem", fontSize: "0.875rem", ...(result.errors > 0 ? { backgroundColor: "#fffbeb", color: "#92400e", border: "1px solid #fcd34d" } : { backgroundColor: "#f0fdf4", color: "#15803d", border: "1px solid #86efac" }) }}>
           ✓ Imported <strong>{result.created}</strong> products{result.errors > 0 ? ` · ${result.errors} errors` : ""}
         </div>
       )}
-      <div className="flex gap-2 justify-end">
-        <button onClick={onClose} style={S.btnOutline} className="px-4 py-2 rounded-lg text-sm">Cancel</button>
-        <button onClick={handleUpload} disabled={loading || !file} style={S.btnDark}
-          className="px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 flex items-center gap-2">
+
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+        <button onClick={onClose} style={{ ...S.btnOutline, padding: "0.5rem 1rem", borderRadius: "0.5rem", fontSize: "0.875rem", cursor: "pointer" }}>Cancel</button>
+        <button onClick={handleUpload} disabled={loading || !file}
+          style={{ ...S.btnDark, padding: "0.5rem 1rem", borderRadius: "0.5rem", fontSize: "0.875rem", fontWeight: 600, cursor: loading || !file ? "not-allowed" : "pointer", opacity: loading || !file ? 0.5 : 1, display: "flex", alignItems: "center", gap: 8 }}>
           {loading && <Spinner />}{loading ? "Uploading…" : "Upload"}
         </button>
       </div>
@@ -283,46 +242,49 @@ function ImportUrlModal({ onClose, onSuccess }: { onClose: () => void; onSuccess
 
   return (
     <Modal title="Import from URL" onClose={onClose} wide>
-      <p className="text-sm text-gray-500 mb-1">
-        Paste any product listing or product page URL. We'll automatically detect the site structure and import products.
+      <p style={{ fontSize: "0.875rem", color: "#6b7280", marginBottom: "1rem" }}>
+        Paste any product listing or product page URL. POSTIKA will automatically detect the site structure and import products.
       </p>
-      <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-700 mb-4">
-        ⚠ Some sites require JavaScript to display products and cannot be scraped directly.
-        If import returns 0 products, try pasting a direct product page URL or use <strong>Bulk Upload ZIP</strong> instead.
-      </div>
-      <div className="space-y-3 mb-4">
-        <input type="url"
-          placeholder="https://www.phoneplacekenya.com/product-category/smartphones/motorola-phones/"
+
+      <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", marginBottom: "1rem" }}>
+        <input
+          type="url"
+          placeholder="https://www.postika.co.ke/products/"
           value={url}
           onChange={(e) => { setUrl(e.target.value); setError(""); setResult(null); }}
           onKeyDown={(e) => e.key === "Enter" && !loading && handleImport()}
-          className="w-full border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          autoFocus />
-        <div className="flex items-center gap-3">
-          <label className="text-xs font-semibold text-gray-600 whitespace-nowrap">Max products:</label>
+          style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: "0.75rem", padding: "0.75rem 1rem", fontSize: "0.875rem", outline: "none", boxSizing: "border-box" }}
+          autoFocus
+        />
+        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+          <label style={{ fontSize: "0.75rem", fontWeight: 600, color: "#4b5563", whiteSpace: "nowrap" }}>Max products:</label>
           <select value={maxItems} onChange={(e) => setMaxItems(e.target.value)}
-            className="border rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none">
+            style={{ border: "1px solid #d1d5db", borderRadius: "0.5rem", padding: "0.25rem 0.75rem", fontSize: "0.875rem", backgroundColor: "#fff" }}>
             {["10", "25", "50", "100"].map((n) => <option key={n} value={n}>{n}</option>)}
           </select>
         </div>
       </div>
+
       {loading && step && (
-        <div className="flex items-center gap-2 text-sm text-blue-600 bg-blue-50 border border-blue-100 rounded-lg px-4 py-3 mb-3">
-          <Spinner className="text-blue-500" /> {step}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.875rem", color: "#2563eb", backgroundColor: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "0.5rem", padding: "0.75rem 1rem", marginBottom: "0.75rem" }}>
+          <Spinner /> {step}
         </div>
       )}
-      {error && <div className="text-red-700 text-sm bg-red-50 border border-red-200 rounded-lg px-4 py-3 mb-3">{error}</div>}
+      {error && (
+        <div style={{ color: "#b91c1c", fontSize: "0.875rem", backgroundColor: "#fef2f2", border: "1px solid #fecaca", borderRadius: "0.5rem", padding: "0.75rem 1rem", marginBottom: "0.75rem" }}>{error}</div>
+      )}
       {result && (
-        <div className={`mb-3 p-3 rounded-lg text-sm border ${result.created > 0 ? "bg-green-50 text-green-700 border-green-200" : "bg-amber-50 text-amber-700 border-amber-200"}`}>
+        <div style={{ marginBottom: "0.75rem", padding: "0.75rem", borderRadius: "0.5rem", fontSize: "0.875rem", ...(result.created > 0 ? { backgroundColor: "#f0fdf4", color: "#15803d", border: "1px solid #86efac" } : { backgroundColor: "#fffbeb", color: "#92400e", border: "1px solid #fcd34d" }) }}>
           {result.created > 0
             ? <>✓ Imported <strong>{result.created}</strong> products{result.skipped > 0 ? ` (${result.skipped} skipped)` : ""} via <em>{result.mode}</em></>
-            : <>⚠ Connected but found <strong>0 products</strong>. The page may require JavaScript.</>}
+            : <>⚠ Connected but found <strong>0 products</strong>. Try a direct product page URL or use Bulk Upload ZIP.</>}
         </div>
       )}
-      <div className="flex gap-2 justify-end">
-        <button onClick={onClose} style={S.btnOutline} className="px-4 py-2 rounded-lg text-sm">Cancel</button>
-        <button onClick={handleImport} disabled={loading || !url.trim()} style={S.btnDark}
-          className="px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 flex items-center gap-2">
+
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+        <button onClick={onClose} style={{ ...S.btnOutline, padding: "0.5rem 1rem", borderRadius: "0.5rem", fontSize: "0.875rem", cursor: "pointer" }}>Cancel</button>
+        <button onClick={handleImport} disabled={loading || !url.trim()}
+          style={{ ...S.btnDark, padding: "0.5rem 1rem", borderRadius: "0.5rem", fontSize: "0.875rem", fontWeight: 600, cursor: loading || !url.trim() ? "not-allowed" : "pointer", opacity: loading || !url.trim() ? 0.5 : 1, display: "flex", alignItems: "center", gap: 8 }}>
           {loading && <Spinner />}{loading ? "Importing…" : "Import"}
         </button>
       </div>
@@ -365,39 +327,39 @@ function AddProductModal({ onClose, onSuccess }: { onClose: () => void; onSucces
 
   return (
     <Modal title="Add Product" onClose={onClose}>
-      <div className="space-y-4">
+      <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
         <Field label="Title *">
           <input placeholder="Samsung Galaxy S24" value={form.title} autoFocus
-            onChange={(e) => set("title", e.target.value)} className={inputCls} />
+            onChange={(e) => set("title", e.target.value)} style={inputStyle} />
         </Field>
         <Field label="Description">
           <textarea placeholder="256GB, excellent condition…" value={form.description} rows={3}
-            onChange={(e) => set("description", e.target.value)} className={`${inputCls} resize-y`} />
+            onChange={(e) => set("description", e.target.value)} style={{ ...inputStyle, resize: "vertical" }} />
         </Field>
-        <div className="grid grid-cols-2 gap-3">
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
           <Field label="SKU">
-            <input placeholder="SKU-001" value={form.sku} onChange={(e) => set("sku", e.target.value)} className={inputCls} />
+            <input placeholder="SKU-001" value={form.sku} onChange={(e) => set("sku", e.target.value)} style={inputStyle} />
           </Field>
           <Field label="Price *">
-            <div className="flex gap-1">
+            <div style={{ display: "flex", gap: 4 }}>
               <select value={form.price_currency} onChange={(e) => set("price_currency", e.target.value)}
-                className="border rounded-lg px-2 py-2 text-sm bg-white focus:outline-none w-20 shrink-0">
+                style={{ border: "1px solid #d1d5db", borderRadius: "0.5rem", padding: "0.5rem", fontSize: "0.875rem", backgroundColor: "#fff", width: 72 }}>
                 {["KES","USD","UGX","TZS"].map((c) => <option key={c}>{c}</option>)}
               </select>
               <input type="number" placeholder="205000" value={form.price_amount}
-                onChange={(e) => set("price_amount", e.target.value)} className={inputCls} />
+                onChange={(e) => set("price_amount", e.target.value)} style={inputStyle} />
             </div>
           </Field>
         </div>
         <Field label="Image URL">
           <input type="url" placeholder="https://…/image.jpg" value={form.image_url}
-            onChange={(e) => set("image_url", e.target.value)} className={inputCls} />
+            onChange={(e) => set("image_url", e.target.value)} style={inputStyle} />
         </Field>
         {error && <ErrorBox>{error}</ErrorBox>}
-        <div className="flex gap-2 justify-end pt-2">
-          <button onClick={onClose} style={S.btnOutline} className="px-4 py-2 rounded-lg text-sm">Cancel</button>
-          <button onClick={handleAdd} disabled={loading} style={S.btnBlue}
-            className="px-5 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 flex items-center gap-2">
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", paddingTop: 8 }}>
+          <button onClick={onClose} style={{ ...S.btnOutline, padding: "0.5rem 1rem", borderRadius: "0.5rem", fontSize: "0.875rem", cursor: "pointer" }}>Cancel</button>
+          <button onClick={handleAdd} disabled={loading}
+            style={{ ...S.btnBlue, padding: "0.5rem 1.25rem", borderRadius: "0.5rem", fontSize: "0.875rem", fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", opacity: loading ? 0.5 : 1, display: "flex", alignItems: "center", gap: 8 }}>
             {loading && <Spinner />}{loading ? "Adding…" : "Add Product"}
           </button>
         </div>
@@ -449,28 +411,27 @@ function EditProductModal({ product, onClose, onSaved }: {
 
   return (
     <Modal title="Edit Product" onClose={onClose} wide>
-      <div className="space-y-4">
+      <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
         {form.image_url && (
-          <div className="flex justify-center">
+          <div style={{ display: "flex", justifyContent: "center" }}>
             <img src={form.image_url} alt={form.title}
               onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-              className="w-28 h-28 object-cover rounded-xl border shadow" />
+              style={{ width: 112, height: 112, objectFit: "cover", borderRadius: "0.75rem", border: "1px solid #e5e7eb" }} />
           </div>
         )}
         <Field label="Title *">
-          <input value={form.title} onChange={(e) => set("title", e.target.value)} autoFocus className={inputCls} />
+          <input value={form.title} onChange={(e) => set("title", e.target.value)} autoFocus style={inputStyle} />
         </Field>
         <Field label="Description">
           <textarea value={form.description} onChange={(e) => set("description", e.target.value)}
-            rows={4} className={`${inputCls} resize-y`} />
+            rows={4} style={{ ...inputStyle, resize: "vertical" }} />
         </Field>
-        <div className="grid grid-cols-2 gap-3">
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
           <Field label="SKU">
-            <input value={form.sku} onChange={(e) => set("sku", e.target.value)} className={inputCls} />
+            <input value={form.sku} onChange={(e) => set("sku", e.target.value)} style={inputStyle} />
           </Field>
           <Field label="Status">
-            <select value={form.status} onChange={(e) => set("status", e.target.value)}
-              className="w-full border rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <select value={form.status} onChange={(e) => set("status", e.target.value)} style={{ ...inputStyle, cursor: "pointer" }}>
               <option value="active">Active</option>
               <option value="inactive">Inactive</option>
               <option value="draft">Draft</option>
@@ -478,24 +439,24 @@ function EditProductModal({ product, onClose, onSaved }: {
           </Field>
         </div>
         <Field label="Price">
-          <div className="flex gap-2">
+          <div style={{ display: "flex", gap: 8 }}>
             <select value={form.price_currency} onChange={(e) => set("price_currency", e.target.value)}
-              className="border rounded-lg px-2 py-2 text-sm bg-white focus:outline-none w-20 shrink-0">
+              style={{ border: "1px solid #d1d5db", borderRadius: "0.5rem", padding: "0.5rem", fontSize: "0.875rem", backgroundColor: "#fff", width: 72 }}>
               {["KES","USD","UGX","TZS"].map((c) => <option key={c}>{c}</option>)}
             </select>
             <input type="number" value={form.price_amount}
-              onChange={(e) => set("price_amount", e.target.value)} className={inputCls} />
+              onChange={(e) => set("price_amount", e.target.value)} style={inputStyle} />
           </div>
         </Field>
         <Field label="Image URL">
           <input type="url" value={form.image_url}
-            onChange={(e) => set("image_url", e.target.value)} className={inputCls} />
+            onChange={(e) => set("image_url", e.target.value)} style={inputStyle} />
         </Field>
         {error && <ErrorBox>{error}</ErrorBox>}
-        <div className="flex gap-2 justify-end pt-3 border-t mt-2">
-          <button onClick={onClose} style={S.btnOutline} className="px-4 py-2 rounded-lg text-sm">Cancel</button>
-          <button onClick={handleSave} disabled={loading} style={S.btnBlue}
-            className="px-5 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 flex items-center gap-2">
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", paddingTop: "0.75rem", borderTop: "1px solid #e5e7eb", marginTop: 8 }}>
+          <button onClick={onClose} style={{ ...S.btnOutline, padding: "0.5rem 1rem", borderRadius: "0.5rem", fontSize: "0.875rem", cursor: "pointer" }}>Cancel</button>
+          <button onClick={handleSave} disabled={loading}
+            style={{ ...S.btnBlue, padding: "0.5rem 1.25rem", borderRadius: "0.5rem", fontSize: "0.875rem", fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", opacity: loading ? 0.5 : 1, display: "flex", alignItems: "center", gap: 8 }}>
             {loading && <Spinner />}{loading ? "Saving…" : "Save Changes"}
           </button>
         </div>
@@ -525,7 +486,6 @@ function CaptionPreviewPanel({ product, templates, onClose }: {
       const payload: Record<string, string> = { product_id: product.id };
       if (templateId) payload.template_id = templateId;
       const raw = await post<unknown>("/api/v1/ai/generate", payload);
-      console.debug("[CaptionPreview] raw response:", raw);
       const text = extractCaption(raw);
       if (!text) setError("The AI returned an empty response. Check the template configuration.");
       else setCaption(stripHtml(text));
@@ -543,51 +503,43 @@ function CaptionPreviewPanel({ product, templates, onClose }: {
   }
 
   return (
-    <tr className="bg-gradient-to-br from-indigo-50 to-blue-50 border-b">
-      <td className="hidden md:table-cell" />
-      <td colSpan={6} className="px-4 py-5">
-        <div className="max-w-2xl">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-bold text-indigo-700 uppercase tracking-wider">
+    <tr style={{ backgroundColor: "#f5f3ff", borderBottom: "1px solid #e5e7eb" }}>
+      <td />
+      <td colSpan={5} style={{ padding: "1.25rem 1rem" }}>
+        <div style={{ maxWidth: "42rem" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.75rem" }}>
+            <span style={{ fontSize: "0.75rem", fontWeight: 700, color: "#4f46e5", textTransform: "uppercase", letterSpacing: "0.05em" }}>
               ✨ Caption Preview
-              <span className="ml-2 font-normal text-gray-500 normal-case">— {stripHtml(product.title)}</span>
+              <span style={{ marginLeft: 8, fontWeight: 400, color: "#6b7280", textTransform: "none" }}>— {stripHtml(product.title)}</span>
             </span>
-            <button onClick={onClose} style={S.btnOutline}
-              className="text-xs px-3 py-1 rounded-full transition">
-              ✕ Close
-            </button>
+            <button onClick={onClose} style={{ ...S.btnOutline, fontSize: "0.75rem", padding: "0.25rem 0.75rem", borderRadius: "999px", cursor: "pointer" }}>✕ Close</button>
           </div>
-          <div className="flex flex-wrap items-center gap-2 mb-3">
-            <label className="text-xs font-semibold text-gray-600 whitespace-nowrap">Template:</label>
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: "0.75rem" }}>
+            <label style={{ fontSize: "0.75rem", fontWeight: 600, color: "#4b5563", whiteSpace: "nowrap" }}>Template:</label>
             <select value={templateId}
               onChange={(e) => { setTemplateId(e.target.value); setCaption(""); setError(""); }}
-              className="border rounded-lg px-3 py-1.5 text-xs flex-1 min-w-[140px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400">
+              style={{ border: "1px solid #d1d5db", borderRadius: "0.5rem", padding: "0.25rem 0.75rem", fontSize: "0.75rem", flex: 1, minWidth: 140, backgroundColor: "#fff" }}>
               {templates.length === 0
                 ? <option value="">No templates — create one first</option>
                 : templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
-            <button onClick={generate} disabled={loading || templates.length === 0} style={S.btnIndigo}
-              className="px-4 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50 transition flex items-center gap-1.5 whitespace-nowrap">
+            <button onClick={generate} disabled={loading || templates.length === 0}
+              style={{ ...S.btnIndigo, padding: "0.375rem 1rem", borderRadius: "0.5rem", fontSize: "0.75rem", fontWeight: 600, cursor: loading || templates.length === 0 ? "not-allowed" : "pointer", opacity: loading || templates.length === 0 ? 0.5 : 1, display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
               {loading && <Spinner />}{loading ? "Generating…" : "Generate"}
             </button>
           </div>
-          {error && (
-            <div className="mb-3 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>
-          )}
+          {error && <div style={{ marginBottom: "0.75rem", fontSize: "0.75rem", color: "#b91c1c", backgroundColor: "#fef2f2", border: "1px solid #fecaca", borderRadius: "0.5rem", padding: "0.5rem 0.75rem" }}>{error}</div>}
           {caption && (
-            <div className="space-y-2">
-              <div className="bg-white border border-indigo-100 rounded-xl p-4 text-sm whitespace-pre-wrap text-gray-800 shadow-sm leading-relaxed">
-                {caption}
-              </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ backgroundColor: "#fff", border: "1px solid #e0e7ff", borderRadius: "0.75rem", padding: "1rem", fontSize: "0.875rem", whiteSpace: "pre-wrap", color: "#1f2937", lineHeight: 1.6 }}>{caption}</div>
               <button onClick={copy}
-                style={copied ? { backgroundColor: "#16a34a", color: "#fff", border: "none" } : S.btnDark}
-                className="text-xs px-4 py-1.5 rounded-lg font-semibold transition">
+                style={{ ...(copied ? { backgroundColor: "#16a34a", color: "#fff", border: "none" } : S.btnDark), fontSize: "0.75rem", padding: "0.375rem 1rem", borderRadius: "0.5rem", fontWeight: 600, cursor: "pointer", alignSelf: "flex-start" }}>
                 {copied ? "✓ Copied!" : "Copy Caption"}
               </button>
             </div>
           )}
           {!hasGenerated && !loading && (
-            <p className="text-xs text-gray-400 italic">
+            <p style={{ fontSize: "0.75rem", color: "#9ca3af", fontStyle: "italic" }}>
               Choose a template and click <strong>Generate</strong> to create an AI caption.
             </p>
           )}
@@ -601,13 +553,24 @@ function CaptionPreviewPanel({ product, templates, onClose }: {
 // SMALL REUSABLE COMPONENTS
 // ─────────────────────────────────────────────────────────────────────────────
 
-const inputCls =
-  "w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  border: "1px solid #d1d5db",
+  borderRadius: "0.5rem",
+  padding: "0.5rem 0.75rem",
+  fontSize: "0.875rem",
+  outline: "none",
+  boxSizing: "border-box",
+  backgroundColor: "#fff",
+};
+
+// Keep inputCls for any remaining className uses
+const inputCls = "w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <label className="block text-xs font-semibold text-gray-600 mb-1">{label}</label>
+      <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "#4b5563", marginBottom: 4 }}>{label}</label>
       {children}
     </div>
   );
@@ -615,7 +578,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function ErrorBox({ children }: { children: React.ReactNode }) {
   return (
-    <div className="text-red-700 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+    <div style={{ color: "#b91c1c", fontSize: "0.875rem", backgroundColor: "#fef2f2", border: "1px solid #fecaca", borderRadius: "0.5rem", padding: "0.5rem 0.75rem" }}>
       {children}
     </div>
   );
@@ -633,23 +596,104 @@ function Spinner({ className = "" }: { className?: string }) {
 function StatusBadge({ status }: { status?: string }) {
   const s = status?.toLowerCase();
   const style: React.CSSProperties =
-    s === "active"
-      ? { backgroundColor: "#dcfce7", color: "#15803d" }
-      : s === "draft"
-      ? { backgroundColor: "#fef9c3", color: "#a16207" }
-      : { backgroundColor: "#f3f4f6", color: "#6b7280" };
+    s === "active"   ? { backgroundColor: "#dcfce7", color: "#15803d" } :
+    s === "draft"    ? { backgroundColor: "#fef9c3", color: "#a16207" } :
+    s === "inactive" ? { backgroundColor: "#fee2e2", color: "#991b1b" } :
+                       { backgroundColor: "#f3f4f6", color: "#6b7280" };
   return (
-    <span style={style} className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium">
+    <span style={{ ...style, display: "inline-flex", alignItems: "center", padding: "0.125rem 0.625rem", borderRadius: "999px", fontSize: "0.75rem", fontWeight: 500 }}>
       {status || "—"}
     </span>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MAIN CATALOG PAGE
+// PAGINATION BAR — defined outside main component to prevent remount
 // ─────────────────────────────────────────────────────────────────────────────
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 150];
+
+function PaginationBar({ filtered, pageSize, setPageSize, safePage, totalPages, setPage }: {
+  filtered: CatalogItem[];
+  pageSize: number;
+  setPageSize: (n: number) => void;
+  safePage: number;
+  totalPages: number;
+  setPage: (n: number) => void;
+}) {
+  if (filtered.length <= pageSize && totalPages <= 1) return null;
+
+  const makeRange = (): (number | "…")[] => {
+    const delta = 2;
+    const result: (number | "…")[] = [];
+    const left = Math.max(2, safePage - delta);
+    const right = Math.min(totalPages - 1, safePage + delta);
+    result.push(1);
+    if (left > 2) result.push("…");
+    for (let i = left; i <= right; i++) result.push(i);
+    if (right < totalPages - 1) result.push("…");
+    if (totalPages > 1) result.push(totalPages);
+    return result;
+  };
+
+  const btnBase: React.CSSProperties = {
+    padding: "0.375rem 0.625rem",
+    borderRadius: "0.5rem",
+    border: "1px solid #d1d5db",
+    fontSize: "0.75rem",
+    fontWeight: 500,
+    cursor: "pointer",
+    transition: "background 0.15s",
+  };
+
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "0.75rem", marginTop: "1rem", padding: "0 0.25rem" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.75rem", color: "#6b7280" }}>
+        <span>Show</span>
+        <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
+          style={{ border: "1px solid #d1d5db", borderRadius: "0.5rem", padding: "0.125rem 0.5rem", fontSize: "0.75rem", backgroundColor: "#fff" }}>
+          {PAGE_SIZE_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
+        </select>
+        <span>per page · <strong>{filtered.length}</strong> total</span>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
+        {[
+          { label: "«", disabled: safePage === 1, onClick: () => setPage(1) },
+          { label: "‹", disabled: safePage === 1, onClick: () => setPage(Math.max(1, safePage - 1)) },
+        ].map(({ label, disabled, onClick }) => (
+          <button key={label} onClick={onClick} disabled={disabled}
+            style={{ ...btnBase, ...(disabled ? { color: "#d1d5db", cursor: "not-allowed" } : { color: "#374151", backgroundColor: "#fff" }) }}>
+            {label}
+          </button>
+        ))}
+
+        {makeRange().map((r, i) =>
+          r === "…"
+            ? <span key={`e${i}`} style={{ padding: "0 4px", color: "#9ca3af", fontSize: "0.75rem" }}>…</span>
+            : <button key={r} onClick={() => setPage(r as number)}
+                style={{ ...btnBase, ...(safePage === r ? { backgroundColor: "#1f2937", color: "#fff", borderColor: "#1f2937" } : { color: "#374151", backgroundColor: "#fff" }) }}>
+                {r}
+              </button>
+        )}
+
+        {[
+          { label: "›", disabled: safePage === totalPages, onClick: () => setPage(Math.min(totalPages, safePage + 1)) },
+          { label: "»", disabled: safePage === totalPages, onClick: () => setPage(totalPages) },
+        ].map(({ label, disabled, onClick }) => (
+          <button key={label} onClick={onClick} disabled={disabled}
+            style={{ ...btnBase, ...(disabled ? { color: "#d1d5db", cursor: "not-allowed" } : { color: "#374151", backgroundColor: "#fff" }) }}>
+            {label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MAIN CATALOG PAGE
+// ─────────────────────────────────────────────────────────────────────────────
 
 export default function Catalog() {
   const [products, setProducts] = useState<CatalogItem[]>([]);
@@ -707,7 +751,11 @@ export default function Catalog() {
   }
 
   function toggleSelect(id: string) {
-    setSelected((prev) => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
   }
 
   function toggleSelectAll() {
@@ -740,55 +788,12 @@ export default function Catalog() {
     } catch (err: any) { alert(err?.message || "Delete failed."); }
   }
 
-  function PaginationBar() {
-    if (filtered.length <= pageSize && totalPages <= 1) return null;
-    const makeRange = (): (number | "…")[] => {
-      const delta = 2; const result: (number | "…")[] = [];
-      const left = Math.max(2, safePage - delta);
-      const right = Math.min(totalPages - 1, safePage + delta);
-      result.push(1);
-      if (left > 2) result.push("…");
-      for (let i = left; i <= right; i++) result.push(i);
-      if (right < totalPages - 1) result.push("…");
-      if (totalPages > 1) result.push(totalPages);
-      return result;
-    };
-    const btnBase = "px-3 py-1.5 rounded-lg border text-xs font-medium transition";
-    return (
-      <div className="flex flex-wrap items-center justify-between gap-3 mt-4 px-1">
-        <div className="flex items-center gap-2 text-xs text-gray-500">
-          <span>Show</span>
-          <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
-            className="border rounded-lg px-2 py-1 text-xs bg-white focus:outline-none">
-            {PAGE_SIZE_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
-          </select>
-          <span>per page · <strong>{filtered.length}</strong> total</span>
-        </div>
-        <div className="flex items-center gap-1 flex-wrap">
-          <button onClick={() => setPage(1)} disabled={safePage === 1}
-            style={safePage === 1 ? { color: "#d1d5db" } : S.btnOutline} className={btnBase}>«</button>
-          <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={safePage === 1}
-            style={safePage === 1 ? { color: "#d1d5db" } : S.btnOutline} className={btnBase}>‹</button>
-          {makeRange().map((r, i) =>
-            r === "…"
-              ? <span key={`e${i}`} className="px-1.5 text-gray-400 text-xs select-none">…</span>
-              : <button key={r} onClick={() => setPage(r as number)}
-                  style={safePage === r ? S.btnDark : S.btnOutline} className={btnBase}>{r}</button>
-          )}
-          <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={safePage === totalPages}
-            style={safePage === totalPages ? { color: "#d1d5db" } : S.btnOutline} className={btnBase}>›</button>
-          <button onClick={() => setPage(totalPages)} disabled={safePage === totalPages}
-            style={safePage === totalPages ? { color: "#d1d5db" } : S.btnOutline} className={btnBase}>»</button>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="p-4 sm:p-6 max-w-screen-xl mx-auto">
+    <div style={{ padding: "1rem", maxWidth: "1280px", margin: "0 auto" }}>
 
+      {/* MODALS */}
       {showBulkUpload && <BulkUploadModal onClose={() => setShowBulkUpload(false)} onSuccess={loadData} />}
-      {showImportUrl && <ImportUrlModal onClose={() => setShowImportUrl(false)} onSuccess={loadData} />}
+      {showImportUrl  && <ImportUrlModal  onClose={() => setShowImportUrl(false)}  onSuccess={loadData} />}
       {showAddProduct && <AddProductModal onClose={() => setShowAddProduct(false)} onSuccess={loadData} />}
       {editingProduct && (
         <EditProductModal
@@ -802,73 +807,69 @@ export default function Catalog() {
       )}
 
       {/* HEADER */}
-      <div className="flex flex-col sm:flex-row sm:items-center gap-4 justify-between mb-6">
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-start", justifyContent: "space-between", gap: "1rem", marginBottom: "1.5rem" }}>
         <div>
-          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-0.5">POSTIKA</p>
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 leading-tight">Catalog</h1>
-          <p className="text-gray-400 text-sm mt-0.5">Manage tenant products.</p>
+          <p style={{ fontSize: "0.7rem", fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 2 }}>POSTIKA</p>
+          <h1 style={{ fontSize: "1.75rem", fontWeight: 700, color: "#111827", margin: 0, lineHeight: 1.2 }}>Catalog</h1>
+          <p style={{ fontSize: "0.875rem", color: "#9ca3af", marginTop: 4 }}>Manage tenant products.</p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => setShowBulkUpload(true)}
-            style={S.btnDark}
-            className="flex-1 sm:flex-none px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold transition whitespace-nowrap"
-          >
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          <button onClick={() => setShowBulkUpload(true)} style={{ ...S.btnDark, padding: "0.5rem 0.875rem", borderRadius: "0.75rem", fontSize: "0.875rem", fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
             📦 Bulk Upload ZIP
           </button>
-          <button
-            onClick={() => setShowImportUrl(true)}
-            style={S.btnDark}
-            className="flex-1 sm:flex-none px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold transition whitespace-nowrap"
-          >
+          <button onClick={() => setShowImportUrl(true)} style={{ ...S.btnDark, padding: "0.5rem 0.875rem", borderRadius: "0.75rem", fontSize: "0.875rem", fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
             🌐 Import URL
           </button>
-          <button
-            onClick={() => setShowAddProduct(true)}
-            style={S.btnBlue}
-            className="flex-1 sm:flex-none px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold transition whitespace-nowrap"
-          >
+          <button onClick={() => setShowAddProduct(true)} style={{ ...S.btnBlue, padding: "0.5rem 0.875rem", borderRadius: "0.75rem", fontSize: "0.875rem", fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
             + Add Product
           </button>
         </div>
       </div>
 
+      {/* ERROR BANNER */}
       {loadError && (
-        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700 flex items-center justify-between">
+        <div style={{ marginBottom: "1rem", padding: "0.75rem 1rem", backgroundColor: "#fef2f2", border: "1px solid #fecaca", borderRadius: "0.75rem", fontSize: "0.875rem", color: "#b91c1c", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           ⚠ {loadError}
-          <button onClick={loadData} style={S.btnOutline} className="underline text-xs font-bold ml-4 px-2 py-1 rounded">Retry</button>
+          <button onClick={loadData} style={{ ...S.btnOutline, fontSize: "0.75rem", fontWeight: 700, padding: "0.25rem 0.5rem", borderRadius: "0.375rem", cursor: "pointer", marginLeft: "1rem" }}>Retry</button>
         </div>
       )}
 
-      <div className="flex flex-col sm:flex-row gap-2 mb-4">
-        <div className="relative flex-1">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">🔍</span>
-          <input type="text" placeholder="Search products…" value={search}
+      {/* SEARCH + BULK DELETE */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: "1rem" }}>
+        <div style={{ position: "relative", flex: 1, minWidth: 200 }}>
+          <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "#9ca3af" }}>🔍</span>
+          <input
+            type="text"
+            placeholder="Search products…"
+            value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full border rounded-xl pl-9 pr-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
+            style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: "0.75rem", paddingLeft: 36, paddingRight: 16, paddingTop: 10, paddingBottom: 10, fontSize: "0.875rem", outline: "none", backgroundColor: "#fff", boxSizing: "border-box" }}
+          />
         </div>
         {selected.size > 0 && (
-          <button onClick={handleBulkDelete} disabled={bulkDeleting} style={S.btnRed}
-            className="px-4 py-2.5 rounded-xl text-sm font-semibold disabled:opacity-50 whitespace-nowrap flex items-center gap-2 transition">
+          <button onClick={handleBulkDelete} disabled={bulkDeleting}
+            style={{ ...S.btnRed, padding: "0.5rem 1rem", borderRadius: "0.75rem", fontSize: "0.875rem", fontWeight: 600, cursor: bulkDeleting ? "not-allowed" : "pointer", opacity: bulkDeleting ? 0.5 : 1, display: "flex", alignItems: "center", gap: 8, whiteSpace: "nowrap" }}>
             {bulkDeleting && <Spinner />}🗑 Delete {selected.size} selected
           </button>
         )}
       </div>
 
+      {/* LOADING */}
       {dataLoading && (
-        <div className="flex items-center justify-center py-20 text-gray-400 gap-3 text-sm">
-          <Spinner className="h-5 w-5" /> Loading catalog…
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "5rem 0", color: "#9ca3af", gap: "0.75rem", fontSize: "0.875rem" }}>
+          <Spinner /> Loading catalog…
         </div>
       )}
 
+      {/* TABLE + CARDS */}
       {!dataLoading && (
         <>
-          <div className="border rounded-2xl overflow-hidden shadow-sm bg-white">
+          <div style={{ border: "1px solid #e5e7eb", borderRadius: "1rem", overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.08)", backgroundColor: "#fff" }}>
 
-            {/* MOBILE CARDS */}
-            <div className="md:hidden divide-y">
+            {/* ── MOBILE CARDS (< 768px) ── */}
+            <div className="md:hidden" style={{ borderTop: "none" }}>
               {paginated.length === 0 && (
-                <div className="p-10 text-center text-gray-400 text-sm">
+                <div style={{ padding: "2.5rem", textAlign: "center", color: "#9ca3af", fontSize: "0.875rem" }}>
                   {products.length === 0 ? "No products yet — add some above." : "No products match your search."}
                 </div>
               )}
@@ -876,33 +877,32 @@ export default function Catalog() {
                 const isChecked = selected.has(product.id);
                 const isOpen = openPreviewId === product.id;
                 return (
-                  <div key={product.id} className={`p-4 ${isChecked ? "bg-red-50" : ""}`}>
-                    <div className="flex items-start gap-3">
+                  <div key={product.id} style={{ padding: "1rem", borderBottom: "1px solid #f3f4f6", backgroundColor: isChecked ? "#fef2f2" : "#fff" }}>
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: "0.75rem" }}>
                       <input type="checkbox" checked={isChecked} onChange={() => toggleSelect(product.id)}
-                        className="accent-red-500 mt-1 cursor-pointer shrink-0" />
+                        style={{ marginTop: 4, cursor: "pointer", accentColor: "#ef4444", width: 16, height: 16, flexShrink: 0 }} />
                       {product.image_url
                         ? <img src={product.image_url} alt={stripHtml(product.title)}
-                            className="w-16 h-16 rounded-xl object-cover border shrink-0"
+                            style={{ width: 64, height: 64, borderRadius: "0.75rem", objectFit: "cover", border: "1px solid #e5e7eb", flexShrink: 0 }}
                             onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
-                        : <div className="w-16 h-16 rounded-xl bg-gray-100 flex items-center justify-center text-gray-300 text-xs shrink-0">IMG</div>}
-                      <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-gray-900 text-sm leading-snug">{stripHtml(product.title)}</p>
-                        <p className="text-xs text-gray-400 mt-0.5 line-clamp-2">{stripHtml(product.description)}</p>
-                        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                          <span className="text-xs font-bold text-gray-800">{formatPrice(product)}</span>
+                        : <div style={{ width: 64, height: 64, borderRadius: "0.75rem", backgroundColor: "#f3f4f6", display: "flex", alignItems: "center", justifyContent: "center", color: "#d1d5db", fontSize: "0.75rem", flexShrink: 0 }}>IMG</div>}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{ fontWeight: 600, color: "#111827", fontSize: "0.875rem", lineHeight: 1.3, margin: 0 }}>{stripHtml(product.title)}</p>
+                        {product.sku && <p style={{ fontSize: "0.7rem", color: "#9ca3af", margin: "2px 0 0" }}>SKU: {product.sku}</p>}
+                        <p style={{ fontSize: "0.75rem", color: "#6b7280", margin: "4px 0 0", overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{stripHtml(product.description)}</p>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+                          <span style={{ fontSize: "0.75rem", fontWeight: 700, color: "#111827" }}>{formatPrice(product)}</span>
                           <StatusBadge status={product.status} />
                         </div>
-                        <div className="flex gap-1.5 mt-2 flex-wrap">
+                        <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
                           <button onClick={() => setOpenPreviewId(isOpen ? null : product.id)}
-                            style={isOpen ? S.btnIndigo : S.btnIndigoOutline}
-                            className="text-xs px-2.5 py-1 rounded-lg font-medium transition">
+                            style={{ ...(isOpen ? S.btnIndigo : S.btnIndigoOutline), fontSize: "0.75rem", padding: "0.25rem 0.625rem", borderRadius: "0.5rem", fontWeight: 500, cursor: "pointer" }}>
                             {isOpen ? "Hide" : "✨ Caption"}
                           </button>
-                          <button onClick={() => setEditingProduct(product)} style={S.btnOutline}
-                            className="text-xs px-2.5 py-1 rounded-lg font-medium transition">Edit</button>
+                          <button onClick={() => setEditingProduct(product)}
+                            style={{ ...S.btnOutline, fontSize: "0.75rem", padding: "0.25rem 0.625rem", borderRadius: "0.5rem", fontWeight: 500, cursor: "pointer" }}>Edit</button>
                           <button onClick={() => handleDelete(product.id)}
-                            style={{ backgroundColor: "#fff", color: "#dc2626", border: "1px solid #fca5a5" }}
-                            className="text-xs px-2.5 py-1 rounded-lg font-medium transition">Delete</button>
+                            style={{ ...S.btnDeleteOutline, fontSize: "0.75rem", padding: "0.25rem 0.625rem", borderRadius: "0.5rem", fontWeight: 500, cursor: "pointer" }}>Delete</button>
                         </div>
                       </div>
                     </div>
@@ -911,26 +911,31 @@ export default function Catalog() {
               })}
             </div>
 
-            {/* DESKTOP TABLE */}
-            <table className="hidden md:table w-full text-sm">
-              <thead className="bg-gray-50 border-b">
-                <tr>
-                  <th className="p-3 w-10">
-                    <input type="checkbox" checked={allOnPageSelected}
+            {/* ── DESKTOP TABLE (md+) ── */}
+            <table className="hidden md:table" style={{ width: "100%", fontSize: "0.875rem", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ backgroundColor: "#f9fafb", borderBottom: "1px solid #e5e7eb" }}>
+                  {/* Checkbox */}
+                  <th style={{ padding: "0.75rem", width: 44, textAlign: "center" }}>
+                    <input
+                      type="checkbox"
+                      checked={allOnPageSelected}
                       ref={(el) => { if (el) el.indeterminate = someOnPageSelected; }}
-                      onChange={toggleSelectAll} className="accent-red-500 cursor-pointer" />
+                      onChange={toggleSelectAll}
+                      style={{ cursor: "pointer", accentColor: "#ef4444", width: 16, height: 16 }}
+                    />
                   </th>
-                  <th className="p-3 text-left font-semibold text-gray-700">Product</th>
-                  <th className="p-3 text-left font-semibold text-gray-700 hidden lg:table-cell">SKU</th>
-                  <th className="p-3 text-left font-semibold text-gray-700">Price</th>
-                  <th className="p-3 text-left font-semibold text-gray-700">Status</th>
-                  <th className="p-3 text-left font-semibold text-gray-700">Actions</th>
+                  <th style={{ padding: "0.75rem", textAlign: "left", fontWeight: 600, color: "#374151" }}>Product</th>
+                  <th style={{ padding: "0.75rem", textAlign: "left", fontWeight: 600, color: "#374151" }}>SKU</th>
+                  <th style={{ padding: "0.75rem", textAlign: "left", fontWeight: 600, color: "#374151" }}>Price</th>
+                  <th style={{ padding: "0.75rem", textAlign: "left", fontWeight: 600, color: "#374151" }}>Status</th>
+                  <th style={{ padding: "0.75rem", textAlign: "left", fontWeight: 600, color: "#374151" }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {paginated.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="p-12 text-center text-gray-400">
+                    <td colSpan={6} style={{ padding: "3rem", textAlign: "center", color: "#9ca3af" }}>
                       {products.length === 0 ? "No products yet — use the buttons above to add some." : "No products match your search."}
                     </td>
                   </tr>
@@ -940,44 +945,69 @@ export default function Catalog() {
                   const isOpen = openPreviewId === product.id;
                   const cleanTitle = stripHtml(product.title);
                   const cleanDesc = stripHtml(product.description);
+
                   return (
                     <Fragment key={product.id}>
-                      <tr className={`border-b transition-colors ${isChecked ? "bg-red-50" : "hover:bg-gray-50/70"}`}>
-                        <td className="p-3">
+                      <tr style={{ borderBottom: "1px solid #f3f4f6", backgroundColor: isChecked ? "#fef2f2" : "transparent", transition: "background 0.1s" }}
+                        onMouseEnter={(e) => { if (!isChecked) (e.currentTarget as HTMLElement).style.backgroundColor = "#f9fafb"; }}
+                        onMouseLeave={(e) => { if (!isChecked) (e.currentTarget as HTMLElement).style.backgroundColor = "transparent"; }}>
+
+                        {/* Checkbox */}
+                        <td style={{ padding: "0.75rem", textAlign: "center" }}>
                           <input type="checkbox" checked={isChecked} onChange={() => toggleSelect(product.id)}
-                            className="accent-red-500 cursor-pointer" />
+                            style={{ cursor: "pointer", accentColor: "#ef4444", width: 16, height: 16 }} />
                         </td>
-                        <td className="p-3">
-                          <div className="flex items-center gap-3">
+
+                        {/* Product */}
+                        <td style={{ padding: "0.75rem" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
                             {product.image_url
                               ? <img src={product.image_url} alt={cleanTitle}
-                                  className="w-12 h-12 rounded-xl object-cover border shrink-0"
+                                  style={{ width: 48, height: 48, borderRadius: "0.75rem", objectFit: "cover", border: "1px solid #e5e7eb", flexShrink: 0 }}
                                   onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
-                              : <div className="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center text-gray-300 text-xs shrink-0">IMG</div>}
-                            <div className="min-w-0">
-                              <p className="font-semibold text-gray-900 truncate max-w-[240px] leading-snug">{cleanTitle}</p>
-                              <p className="text-xs text-gray-400 line-clamp-1 max-w-[260px] mt-0.5">{cleanDesc}</p>
+                              : <div style={{ width: 48, height: 48, borderRadius: "0.75rem", backgroundColor: "#f3f4f6", display: "flex", alignItems: "center", justifyContent: "center", color: "#d1d5db", fontSize: "0.75rem", flexShrink: 0 }}>IMG</div>}
+                            <div style={{ minWidth: 0 }}>
+                              <p style={{ fontWeight: 600, color: "#111827", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 240 }}>{cleanTitle}</p>
+                              <p style={{ fontSize: "0.75rem", color: "#9ca3af", margin: "2px 0 0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 260 }}>{cleanDesc}</p>
                             </div>
                           </div>
                         </td>
-                        <td className="p-3 text-gray-500 text-xs hidden lg:table-cell">{product.sku || "—"}</td>
-                        <td className="p-3 font-semibold text-gray-900">{formatPrice(product)}</td>
-                        <td className="p-3"><StatusBadge status={product.status} /></td>
-                        <td className="p-3">
-                          <div className="flex items-center gap-1.5 flex-wrap">
+
+                        {/* SKU — always visible, no lg:hidden */}
+                        <td style={{ padding: "0.75rem", color: "#6b7280", fontSize: "0.75rem" }}>
+                          {product.sku || "—"}
+                        </td>
+
+                        {/* Price */}
+                        <td style={{ padding: "0.75rem", fontWeight: 600, color: "#111827" }}>
+                          {formatPrice(product)}
+                        </td>
+
+                        {/* Status */}
+                        <td style={{ padding: "0.75rem" }}>
+                          <StatusBadge status={product.status} />
+                        </td>
+
+                        {/* Actions */}
+                        <td style={{ padding: "0.75rem" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                             <button onClick={() => setOpenPreviewId(isOpen ? null : product.id)}
-                              style={isOpen ? S.btnIndigo : S.btnIndigoOutline}
-                              className="text-xs px-2.5 py-1.5 rounded-lg font-medium transition">
+                              style={{ ...(isOpen ? S.btnIndigo : S.btnIndigoOutline), fontSize: "0.75rem", padding: "0.25rem 0.625rem", borderRadius: "0.5rem", fontWeight: 500, cursor: "pointer" }}>
                               {isOpen ? "Hide" : "✨ Caption"}
                             </button>
-                            <button onClick={() => setEditingProduct(product)} style={S.btnOutline}
-                              className="text-xs px-2.5 py-1.5 rounded-lg font-medium transition">Edit</button>
+                            <button onClick={() => setEditingProduct(product)}
+                              style={{ ...S.btnOutline, fontSize: "0.75rem", padding: "0.25rem 0.625rem", borderRadius: "0.5rem", fontWeight: 500, cursor: "pointer" }}>
+                              Edit
+                            </button>
                             <button onClick={() => handleDelete(product.id)}
-                              style={{ backgroundColor: "#fff", color: "#dc2626", border: "1px solid #fca5a5" }}
-                              className="text-xs px-2.5 py-1.5 rounded-lg font-medium transition">Delete</button>
+                              style={{ ...S.btnDeleteOutline, fontSize: "0.75rem", padding: "0.25rem 0.625rem", borderRadius: "0.5rem", fontWeight: 500, cursor: "pointer" }}>
+                              Delete
+                            </button>
                           </div>
                         </td>
                       </tr>
+
+                      {/* Caption preview inline row */}
                       {isOpen && (
                         <CaptionPreviewPanel product={product} templates={templates}
                           onClose={() => setOpenPreviewId(null)} />
@@ -989,9 +1019,18 @@ export default function Catalog() {
             </table>
           </div>
 
-          <PaginationBar />
+          {/* PAGINATION */}
+          <PaginationBar
+            filtered={filtered}
+            pageSize={pageSize}
+            setPageSize={setPageSize}
+            safePage={safePage}
+            totalPages={totalPages}
+            setPage={setPage}
+          />
 
-          <p className="text-xs text-gray-400 mt-2">
+          {/* FOOTER COUNT */}
+          <p style={{ fontSize: "0.75rem", color: "#9ca3af", marginTop: 8 }}>
             Showing {paginated.length > 0 ? `${pageStart + 1}–${pageStart + paginated.length}` : "0"} of{" "}
             {filtered.length} product{filtered.length !== 1 ? "s" : ""}
             {selected.size > 0 ? ` · ${selected.size} selected` : ""}
