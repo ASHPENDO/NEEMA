@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from "react";
+// src/pages/Login.tsx
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { PageShell } from "../components/PageShell";
 import { Input } from "../components/Input";
@@ -10,7 +11,22 @@ import { useAuth } from "../auth/AuthContext";
 export default function Login() {
   const nav = useNavigate();
   const [params] = useSearchParams();
-  const { requestCode, setPendingEmail, setPendingInviteToken } = useAuth();
+
+  // 🔥 ADD token + bootstrapping
+  const {
+    token,
+    isBootstrapping,
+    requestCode,
+    setPendingEmail,
+    setPendingInviteToken,
+  } = useAuth();
+
+  // 🔥 Prevent showing login when already authenticated
+  useEffect(() => {
+    if (!isBootstrapping && token) {
+      nav("/dashboard", { replace: true });
+    }
+  }, [token, isBootstrapping, nav]);
 
   const nextParam = useMemo(() => {
     const n = params.get("next");
@@ -27,12 +43,13 @@ export default function Login() {
   const [serverError, setServerError] = useState<string | null>(null);
 
   const emailNorm = useMemo(() => normalizeEmail(email), [email]);
+
   const emailError =
     email.length === 0
       ? undefined
       : isValidEmail(emailNorm)
-        ? undefined
-        : "Enter a valid email address.";
+      ? undefined
+      : "Enter a valid email address.";
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -44,13 +61,17 @@ export default function Login() {
     }
 
     setLoading(true);
+
     try {
       await requestCode(emailNorm);
+
       setPendingEmail(emailNorm);
 
       if (inviteToken) {
         setPendingInviteToken(inviteToken);
       }
+
+      await Promise.resolve();
 
       const verifyParams = new URLSearchParams();
 
@@ -63,6 +84,7 @@ export default function Login() {
       }
 
       const query = verifyParams.toString();
+
       nav(query ? `/verify?${query}` : "/verify");
     } catch (err) {
       if (err instanceof ApiError) {
@@ -80,11 +102,11 @@ export default function Login() {
       title="Sign in"
       subtitle="Enter your email and we’ll send a one-time verification code."
     >
-      {serverError ? (
+      {serverError && (
         <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {serverError}
         </div>
-      ) : null}
+      )}
 
       <form onSubmit={onSubmit} className="space-y-4">
         <Input

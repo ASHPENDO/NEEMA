@@ -8,24 +8,11 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
 }
 
-// Inline style fallbacks — guarantee visibility even if Tailwind
-// fails to generate the class in v4's CSS scanner pass.
-const INLINE_STYLES: Record<ButtonVariant, React.CSSProperties> = {
-  primary: {
-    backgroundColor: "#0f172a",  // slate-900
-    color: "#ffffff",
-    borderColor: "transparent",
-  },
-  secondary: {
-    backgroundColor: "#ffffff",
-    color: "#374151",             // slate-700 approx
-    borderColor: "#e2e8f0",      // slate-200
-  },
-  danger: {
-    backgroundColor: "#ffffff",
-    color: "#dc2626",            // red-600
-    borderColor: "#fecaca",      // red-200
-  },
+// Inline style fallbacks — ensure visibility even if Tailwind purges the class
+const VARIANT_STYLES: Record<ButtonVariant, React.CSSProperties> = {
+  primary:   { backgroundColor: "#0f172a", color: "#ffffff", borderColor: "transparent" },
+  secondary: { backgroundColor: "#ffffff", color: "#374151", borderColor: "#e2e8f0" },
+  danger:    { backgroundColor: "#ffffff", color: "#dc2626", borderColor: "#fecaca" },
 };
 
 export function Button({
@@ -38,16 +25,12 @@ export function Button({
   style,
   ...props
 }: ButtonProps) {
-  const base =
-    "inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-semibold transition-all " +
-    "disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1";
-
   const variantClass =
     variant === "primary"
       ? "bg-slate-900 text-white border border-transparent hover:bg-slate-700 focus-visible:ring-slate-900 shadow-sm"
       : variant === "danger"
-      ? "bg-white text-red-600 border border-red-200 hover:bg-red-50 hover:border-red-300 focus-visible:ring-red-400 shadow-sm"
-      : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 hover:border-slate-300 focus-visible:ring-slate-400 shadow-sm";
+      ? "bg-white text-red-600 border border-red-200 hover:bg-red-50 focus-visible:ring-red-400 shadow-sm"
+      : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 focus-visible:ring-slate-400 shadow-sm";
 
   return (
     <button
@@ -55,32 +38,21 @@ export function Button({
       type={type}
       disabled={disabled || loading}
       aria-busy={loading || undefined}
-      // Merge inline styles: variant defaults first, then caller overrides
-      style={{ ...INLINE_STYLES[variant], ...style }}
-      className={[base, variantClass, className].join(" ").trim()}
+      style={{ ...VARIANT_STYLES[variant], ...style }}
+      className={[
+        "inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-semibold transition-all",
+        "disabled:opacity-50 disabled:cursor-not-allowed",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1",
+        variantClass,
+        className,
+      ].join(" ").trim()}
     >
       {loading ? (
         <span className="flex items-center gap-2">
-          <svg
-            className="h-3.5 w-3.5 animate-spin"
-            xmlns="http://www.w3.org/2000/svg"
-            fill="none"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-          >
-            <circle
-              className="opacity-25"
-              cx="12"
-              cy="12"
-              r="10"
-              stroke="currentColor"
-              strokeWidth="4"
-            />
-            <path
-              className="opacity-75"
-              fill="currentColor"
-              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-            />
+          <svg className="h-3.5 w-3.5 animate-spin" xmlns="http://www.w3.org/2000/svg"
+            fill="none" viewBox="0 0 24 24" aria-hidden="true">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
           </svg>
           Please wait...
         </span>

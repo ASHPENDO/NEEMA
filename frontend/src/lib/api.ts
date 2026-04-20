@@ -28,15 +28,53 @@ export type RequestOptions = {
   signal?: AbortSignal;
 };
 
-// Use localhost consistently in dev to avoid browser origin quirks.
-const DEFAULT_DEV_BASE = "http://localhost:8000";
-const rawBase = import.meta.env.VITE_API_BASE_URL ?? DEFAULT_DEV_BASE;
-const BASE_URL = String(rawBase).replace(/\/+$/, "");
+// --------------------------------------------------
+// BASE URL RESOLUTION (FIXED FOR CODESPACES + LOCAL)
+// --------------------------------------------------
+function resolveBaseUrl() {
+  // 1. Explicit env always wins
+  if (import.meta.env.VITE_API_BASE_URL) {
+    return String(import.meta.env.VITE_API_BASE_URL).replace(/\/+$/, "");
+  }
+  // 2. Detect GitHub Codespaces / dev container
+  if (typeof window !== "undefined") {
+    const { hostname } = window.location;
+    // If running in github.dev / codespaces → swap frontend port for backend port
+    if (hostname.includes("github.dev") || hostname.includes("app.github.dev")) {
+      // e.g. psychic-tribble-5g6vj99gqxg72p4g7-5173.app.github.dev
+      //   → psychic-tribble-5g6vj99gqxg72p4g7-8000.app.github.dev
+      const backendHostname = hostname.replace(/-\d+(\.app\.github\.dev)$/, "-8000$1");
+      return `${window.location.protocol}//${backendHostname}`;
+    }
+  }
+  // 3. Default local dev
+  return "http://localhost:8000";
+}
 
+const BASE_URL = resolveBaseUrl();
 console.log("[API] BASE_URL =", BASE_URL);
 
 const client = axios.create({
   baseURL: BASE_URL,
+});
+
+// --------------------------------------------------
+// REQUEST INTERCEPTOR — attach auth + tenant headers
+// --------------------------------------------------
+client.interceptors.request.use((config) => {
+  const token = tokenStorage.get();
+  // 🔥 Ensure headers object ALWAYS exists
+  config.headers = {
+    ...(config.headers || {}),
+  };
+  if (token) {
+    config.headers["Authorization"] = `Bearer ${token}`;
+  }
+  const tenantId = activeTenantStorage.get();
+  if (tenantId) {
+    config.headers["X-Tenant-Id"] = tenantId;
+  }
+  return config;
 });
 
 function buildHeaders(opts: RequestOptions, contentType?: string): Record<string, string> {
@@ -338,7 +376,6 @@ export type TenantInvitation = {
 export type CreateInvitationRequest = {
   email: string;
   role: TenantRole;
-  permissions?: string[];
 };
 
 export type AcceptTenantInvitationResponse = {
@@ -426,9 +463,10 @@ export async function updateTenantMember(
 export const getTenantMembers = async <T = TenantMember[]>(): Promise<T> => {
   return (await listTenantMembers()) as unknown as T;
 };
+
 /*
  * ============================================================================
- * Campaigns (OPTION A - BASE_URL includes /api/v1)
+ * Campaigns
  * ============================================================================
  */
 
@@ -448,12 +486,6 @@ export type PostHistory = {
   external_post_id: string;
   created_at: string;
 };
-
-/*
- * ============================================================================
- * Campaigns (FIXED - USE /api/v1 PREFIX)
- * ============================================================================
- */
 
 export async function listCampaigns(): Promise<Campaign[]> {
   return await get("/api/v1/campaigns");

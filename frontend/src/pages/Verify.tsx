@@ -1,3 +1,4 @@
+// src/pages/Verify.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { PageShell } from "../components/PageShell";
@@ -5,17 +6,7 @@ import { Input } from "../components/Input";
 import { Button } from "../components/Button";
 import { ApiError } from "../lib/api";
 import { normalizeOtp } from "../lib/validators";
-import { useAuth } from "../auth/AuthContext";
-
-// -----------------------------
-// Helpers
-// -----------------------------
-function isProfileComplete(me: any): boolean {
-  if (!me) return false;
-
-  // Adjust based on your actual schema
-  return Boolean(me.name && me.phone_number);
-}
+import { useAuth, isProfileComplete } from "../auth/AuthContext";
 
 export default function Verify() {
   const nav = useNavigate();
@@ -26,12 +17,19 @@ export default function Verify() {
     clearPendingEmail,
     requestCode,
     verifyCode,
+    refreshMe,
     setPendingInviteToken,
     getPendingInviteToken,
-    me,
   } = useAuth();
 
   const pendingEmail = getPendingEmail();
+
+  // HARD GUARD
+  useEffect(() => {
+    if (!pendingEmail) {
+      nav("/login", { replace: true });
+    }
+  }, [pendingEmail, nav]);
 
   useEffect(() => {
     const token = params.get("token");
@@ -63,11 +61,7 @@ export default function Verify() {
     setServerError(null);
     setInfo(null);
 
-    if (!pendingEmail) {
-      setServerError("Missing email. Please start again.");
-      nav("/login", { replace: true });
-      return;
-    }
+    if (!pendingEmail) return;
 
     if (otp.length < 4) {
       setServerError("Enter your verification code.");
@@ -77,35 +71,38 @@ export default function Verify() {
     setLoading(true);
     try {
       await verifyCode(pendingEmail, otp);
+
+      // 🔥 CRITICAL: fetch fresh user AFTER token is set
+      const user = await refreshMe();
+
       clearPendingEmail();
 
       const pendingInvite = getPendingInviteToken();
 
-      // 1. Invitation takes priority
+      // 1️⃣ Invitation ALWAYS wins
       if (pendingInvite) {
-        nav(
-          `/accept-invitation?token=${encodeURIComponent(pendingInvite)}`,
-          { replace: true }
-        );
+        nav(`/accept-invitation?token=${encodeURIComponent(pendingInvite)}`, {
+          replace: true,
+        });
         return;
       }
 
-      // 2. Profile incomplete → fix first
-      if (!isProfileComplete(me)) {
+      // 2️⃣ Profile completion (TOS + notifications)
+      if (!isProfileComplete(user)) {
         nav("/profile-completion", { replace: true });
         return;
       }
 
-      // 3. Has tenant membership?
-      const hasTenant = me?.tenants && me.tenants.length > 0;
+      // 3️⃣ Tenant exists → go to app
+      const hasTenant = user?.tenants && user.tenants.length > 0;
 
-      if (!hasTenant) {
-        nav("/tenant-create", { replace: true });
+      if (hasTenant) {
+        nav("/tenant-gate", { replace: true });
         return;
       }
 
-      // 4. Otherwise → dashboard
-      nav("/dashboard", { replace: true });
+      // 4️⃣ Owner with no tenant → create tenant
+      nav("/tenant-create", { replace: true });
     } catch (err) {
       if (err instanceof ApiError) setServerError(err.message);
       else setServerError("Verification failed. Please try again.");
@@ -121,11 +118,7 @@ export default function Verify() {
     setServerError(null);
     setInfo(null);
 
-    if (!pendingEmail) {
-      setServerError("Missing email. Please start again.");
-      nav("/login", { replace: true });
-      return;
-    }
+    if (!pendingEmail) return;
 
     setResending(true);
     try {
@@ -139,9 +132,6 @@ export default function Verify() {
     }
   }
 
-  // -----------------------------
-  // UI
-  // -----------------------------
   return (
     <PageShell
       title="Verify code"
@@ -151,17 +141,17 @@ export default function Verify() {
           : "Enter the code from your email."
       }
     >
-      {serverError ? (
+      {serverError && (
         <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {serverError}
         </div>
-      ) : null}
+      )}
 
-      {info ? (
+      {info && (
         <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
           {info}
         </div>
-      ) : null}
+      )}
 
       <form onSubmit={onVerify} className="space-y-4">
         <Input

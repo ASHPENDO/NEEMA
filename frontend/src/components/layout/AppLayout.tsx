@@ -1,4 +1,3 @@
-// src/components/layout/AppLayout.tsx
 import React from "react";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
@@ -7,44 +6,118 @@ import Topbar from "./Topbar";
 
 export default function AppLayout() {
   const location = useLocation();
-  const { isAuthed, isBootstrapping } = useAuth();
 
+  // 🔥 FIX: use token instead of isAuthed
+  const { token, isBootstrapping } = useAuth();
+
+  // Wait for auth hydration before making routing decisions
   if (isBootstrapping) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
-        <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-6 py-5 shadow-sm">
-          {/* Spinner */}
+      <div
+        style={{
+          display: "flex",
+          minHeight: "100vh",
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: "#f8fafc",
+          padding: "1rem",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "0.75rem",
+            borderRadius: "1rem",
+            border: "1px solid #e2e8f0",
+            backgroundColor: "#fff",
+            padding: "1.25rem 1.5rem",
+            boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
+          }}
+        >
           <svg
-            className="h-4 w-4 animate-spin text-slate-400"
+            style={{
+              width: 16,
+              height: 16,
+              animation: "spin 1s linear infinite",
+              color: "#94a3b8",
+            }}
             xmlns="http://www.w3.org/2000/svg"
             fill="none"
             viewBox="0 0 24 24"
             aria-hidden="true"
           >
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <circle
+              style={{ opacity: 0.25 }}
+              cx="12"
+              cy="12"
+              r="10"
+              stroke="currentColor"
+              strokeWidth="4"
+            />
             <path
-              className="opacity-75"
+              style={{ opacity: 0.75 }}
               fill="currentColor"
               d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
             />
           </svg>
-          <span className="text-sm text-slate-600">Loading workspace…</span>
+          <span style={{ fontSize: "0.875rem", color: "#475569" }}>
+            Loading workspace…
+          </span>
         </div>
+
+        <style>{`
+          @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+          }
+        `}</style>
       </div>
     );
   }
 
-  if (!isAuthed) {
-    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+  // 🔥 CRITICAL FIX:
+  // Use token presence (NOT user/isAuthed) to determine authentication
+  if (!token) {
+    return (
+      <Navigate
+        to="/login"
+        replace
+        state={{ from: location.pathname }}
+      />
+    );
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      <div className="min-h-screen lg:flex">
+    <div
+      style={{
+        minHeight: "100vh",
+        backgroundColor: "#f8fafc",
+        color: "#0f172a",
+      }}
+    >
+      <div style={{ minHeight: "100vh", display: "flex" }}>
         <Sidebar />
-        <div className="min-w-0 flex-1 flex flex-col">
+
+        <div
+          style={{
+            flex: 1,
+            minWidth: 0,
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
           <Topbar />
-          <main className="flex-1 mx-auto w-full max-w-5xl px-4 py-6 lg:px-8 lg:py-8">
+
+          <main
+            style={{
+              flex: 1,
+              margin: "0 auto",
+              width: "100%",
+              maxWidth: "64rem",
+              padding: "1.5rem 1rem",
+            }}
+          >
             <Outlet />
           </main>
         </div>

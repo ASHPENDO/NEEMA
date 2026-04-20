@@ -17,23 +17,28 @@ import TenantInvitations from "../pages/TenantInvitations";
 
 import CampaignList from "../pages/CampaignList";
 import CampaignDetail from "../pages/CampaignDetail";
-import CreateCampaign from "../pages/CreateCampaign"; // ✅ NEW
+import CreateCampaign from "../pages/CreateCampaign";
 
 import RequirePermissions from "../components/RequirePermissions";
 import AppLayout from "../components/layout/AppLayout";
 
 export const router = createBrowserRouter([
-  { path: "/", element: <Navigate to="/tenant-gate" replace /> },
+  // Root → login (AppLayout will redirect authed users to dashboard via its own guard,
+  // and unauthenticated users see login. This breaks the /tenant-gate loop.)
+  { path: "/", element: <Navigate to="/login" replace /> },
 
-  { path: "/login", element: <Login /> },
-  { path: "/verify", element: <Verify /> },
-  { path: "/accept-invitation", element: <AcceptInvitation /> },
+  // ── Public auth routes ─────────────────────────────────────────────────────
+  { path: "/login",              element: <Login /> },
+  { path: "/verify",             element: <Verify /> },
+  { path: "/accept-invitation",  element: <AcceptInvitation /> },
 
-  { path: "/tenant-gate", element: <TenantGate /> },
-  { path: "/tenant-selection", element: <TenantSelection /> },
-  { path: "/tenant-create", element: <TenantCreate /> },
+  // ── Onboarding routes (self-guarded inside each page) ─────────────────────
+  { path: "/tenant-gate",        element: <TenantGate /> },
+  { path: "/tenant-selection",   element: <TenantSelection /> },
+  { path: "/tenant-create",      element: <TenantCreate /> },
   { path: "/profile-completion", element: <ProfileCompletion /> },
 
+  // ── Authenticated app routes ───────────────────────────────────────────────
   {
     element: <AppLayout />,
     children: [
@@ -47,7 +52,6 @@ export const router = createBrowserRouter([
           </RequirePermissions>
         ),
       },
-
       {
         path: "/tenant-members",
         element: (
@@ -56,7 +60,6 @@ export const router = createBrowserRouter([
           </RequirePermissions>
         ),
       },
-
       {
         path: "/tenant-invitations",
         element: (
@@ -65,21 +68,9 @@ export const router = createBrowserRouter([
           </RequirePermissions>
         ),
       },
-
-      {
-        path: "/campaigns",
-        element: <CampaignList />,
-      },
-
-      {
-        path: "/campaigns/create", // ✅ NEW
-        element: <CreateCampaign />,
-      },
-
-      {
-        path: "/campaigns/:id",
-        element: <CampaignDetail />,
-      },
+      { path: "/campaigns",        element: <CampaignList /> },
+      { path: "/campaigns/create", element: <CreateCampaign /> },
+      { path: "/campaigns/:id",    element: <CampaignDetail /> },
     ],
   },
 ]);
