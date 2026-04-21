@@ -12,7 +12,6 @@ export default function Login() {
   const nav = useNavigate();
   const [params] = useSearchParams();
 
-  // 🔥 ADD token + bootstrapping
   const {
     token,
     isBootstrapping,
@@ -21,10 +20,10 @@ export default function Login() {
     setPendingInviteToken,
   } = useAuth();
 
-  // 🔥 Prevent showing login when already authenticated
+  // Already authenticated → let TenantGate orchestrate onboarding
   useEffect(() => {
     if (!isBootstrapping && token) {
-      nav("/dashboard", { replace: true });
+      nav("/tenant-gate", { replace: true });
     }
   }, [token, isBootstrapping, nav]);
 
@@ -100,7 +99,7 @@ export default function Login() {
   return (
     <PageShell
       title="Sign in"
-      subtitle="Enter your email and we’ll send a one-time verification code."
+      subtitle="Enter your email and we'll send a one-time verification code."
     >
       {serverError && (
         <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -124,7 +123,7 @@ export default function Login() {
         </Button>
 
         <div className="text-xs text-slate-500">
-          By continuing, you agree to POSTIKA’s Terms and Privacy Policy.
+          By continuing, you agree to POSTIKA's Terms and Privacy Policy.
         </div>
       </form>
     </PageShell>

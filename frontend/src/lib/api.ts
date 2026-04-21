@@ -32,84 +32,69 @@ export type RequestOptions = {
 // BASE URL RESOLUTION (FIXED FOR CODESPACES + LOCAL)
 // --------------------------------------------------
 function resolveBaseUrl() {
-  // 1. Explicit env always wins
   if (import.meta.env.VITE_API_BASE_URL) {
     return String(import.meta.env.VITE_API_BASE_URL).replace(/\/+$/, "");
   }
-  // 2. Detect GitHub Codespaces / dev container
   if (typeof window !== "undefined") {
     const { hostname } = window.location;
-    // If running in github.dev / codespaces → swap frontend port for backend port
     if (hostname.includes("github.dev") || hostname.includes("app.github.dev")) {
-      // e.g. psychic-tribble-5g6vj99gqxg72p4g7-5173.app.github.dev
-      //   → psychic-tribble-5g6vj99gqxg72p4g7-8000.app.github.dev
       const backendHostname = hostname.replace(/-\d+(\.app\.github\.dev)$/, "-8000$1");
       return `${window.location.protocol}//${backendHostname}`;
     }
   }
-  // 3. Default local dev
   return "http://localhost:8000";
 }
 
 const BASE_URL = resolveBaseUrl();
 console.log("[API] BASE_URL =", BASE_URL);
 
+// --------------------------------------------------
+// SINGLE AXIOS INSTANCE
+// --------------------------------------------------
 const client = axios.create({
   baseURL: BASE_URL,
 });
 
 // --------------------------------------------------
-// REQUEST INTERCEPTOR — attach auth + tenant headers
+// INTERCEPTOR — single source of truth for ALL headers
 // --------------------------------------------------
 client.interceptors.request.use((config) => {
+  config.headers = config.headers || {};
+
+  // Auth token
   const token = tokenStorage.get();
-  // 🔥 Ensure headers object ALWAYS exists
-  config.headers = {
-    ...(config.headers || {}),
-  };
   if (token) {
     config.headers["Authorization"] = `Bearer ${token}`;
   }
+
+  // Active tenant — critical for membership + permissions
   const tenantId = activeTenantStorage.get();
   if (tenantId) {
     config.headers["X-Tenant-Id"] = tenantId;
   }
+
+  // Content-Type: only set for non-FormData requests
+  // FormData must NOT have Content-Type set — browser sets the multipart boundary
+  if (!(config.data instanceof FormData)) {
+    config.headers["Content-Type"] = "application/json";
+  }
+
   return config;
 });
 
-function buildHeaders(opts: RequestOptions, contentType?: string): Record<string, string> {
-  const auth = opts.auth ?? true;
-
-  const headers: Record<string, string> = {
-    ...(contentType ? { "Content-Type": contentType } : {}),
-    ...(opts.headers ?? {}),
-  };
-
-  if (auth) {
-    const token = tokenStorage.get();
-    if (token) headers.Authorization = `Bearer ${token}`;
-  }
-
-  const tenantId = activeTenantStorage.get();
-  if (tenantId) {
-    headers["X-Tenant-Id"] = tenantId;
-  }
-
-  return headers;
-}
-
+// --------------------------------------------------
+// api() — pure transport, interceptor handles headers
+// --------------------------------------------------
 export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T> {
-  const method = opts.method ?? "GET";
-  const headers = buildHeaders(opts, "application/json");
   const url = path.startsWith("/") ? path : `/${path}`;
 
   try {
     const res = await client.request<T>({
       url,
-      method,
-      headers,
+      method: opts.method ?? "GET",
       data: opts.body,
       signal: opts.signal,
+      headers: opts.headers, // caller overrides only — interceptor always runs first
     });
     return res.data;
   } catch (err) {
@@ -119,7 +104,9 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
     const payload = response?.data;
 
     let message: any =
-      (payload && typeof payload === "object" && "detail" in payload && (payload as any).detail) ||
+      (payload && typeof payload === "object" && "detail" in payload
+        ? (payload as any).detail
+        : null) ||
       response?.statusText ||
       "Request failed";
 
@@ -129,26 +116,26 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
   }
 }
 
-/**
- * apiForm: same as api(), but sends multipart/form-data safely.
- * Important: DO NOT set Content-Type here; the browser will set the boundary.
- */
+// --------------------------------------------------
+// apiForm — multipart/form-data
+// Content-Type intentionally omitted — interceptor
+// detects FormData and skips setting it, so browser
+// sets the correct multipart boundary automatically
+// --------------------------------------------------
 export async function apiForm<T>(
   path: string,
   form: FormData,
   opts: Omit<RequestOptions, "body"> = {}
 ): Promise<T> {
-  const method = opts.method ?? "POST";
-  const headers = buildHeaders({ ...opts }, undefined);
   const url = path.startsWith("/") ? path : `/${path}`;
 
   try {
     const res = await client.request<T>({
       url,
-      method,
-      headers,
+      method: opts.method ?? "POST",
       data: form,
       signal: opts.signal,
+      headers: opts.headers, // caller overrides only
     });
     return res.data;
   } catch (err) {
@@ -158,7 +145,9 @@ export async function apiForm<T>(
     const payload = response?.data;
 
     let message: any =
-      (payload && typeof payload === "object" && "detail" in payload && (payload as any).detail) ||
+      (payload && typeof payload === "object" && "detail" in payload
+        ? (payload as any).detail
+        : null) ||
       response?.statusText ||
       "Request failed";
 
