@@ -1,25 +1,18 @@
-import axios from "axios";
-
-// ✅ SAFE BASE (bypasses broken api.ts)
-const BASE_URL = "http://localhost:8000/api/v1";
-
-const client = axios.create({
-  baseURL: BASE_URL,
-});
+// src/api/campaigns.ts
+// Uses the shared api() transport which has the interceptor
+// that injects Authorization + X-Tenant-Id on every request.
+import { get, post } from "../lib/api";
 
 export async function fetchCampaigns() {
-  const res = await client.get("/campaigns");
-  return res.data;
+  return await get<any[]>("/api/v1/campaigns");
 }
 
 export async function fetchCampaign(id: string) {
-  const res = await client.get(`/campaigns/${id}`);
-  return res.data;
+  return await get<any>(`/api/v1/campaigns/${id}`);
 }
 
 export async function fetchCampaignHistory(id: string) {
-  const res = await client.get(`/campaigns/${id}/history`);
-  return res.data;
+  return await get<any[]>(`/api/v1/campaigns/${id}/history`);
 }
 
 export default {
