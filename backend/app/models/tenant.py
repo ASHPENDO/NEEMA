@@ -22,7 +22,7 @@ class Tenant(Base):
 
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
-    # ✅ Sales attribution (set when tenant is created using a valid referral_code)
+    # ✅ Sales attribution (platform-level salesperson)
     salesperson_profile_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("salesperson_profiles.id", ondelete="SET NULL"),

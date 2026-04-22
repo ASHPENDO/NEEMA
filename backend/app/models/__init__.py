@@ -1,5 +1,3 @@
-# app/models/__init__.py
-
 """
 Model registry for SQLAlchemy.
 
@@ -23,6 +21,7 @@ from app.models.tenant_invitation import TenantInvitation  # noqa: F401
 from app.models.platform_invitation import PlatformInvitation  # noqa: F401
 from app.models.platform_membership import PlatformMembership  # noqa: F401
 from app.models.salesperson_profile import SalespersonProfile  # noqa: F401
+from app.models.salesperson_earning_event import SalespersonEarningEvent  # noqa: F401
 
 
 # =========================

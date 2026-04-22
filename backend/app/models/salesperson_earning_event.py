@@ -1,4 +1,3 @@
-# app/models/salesperson_earning_event.py
 from __future__ import annotations
 
 import uuid
@@ -6,7 +5,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, Index, Numeric, String
+from sqlalchemy import DateTime, ForeignKey, Index, Numeric, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
@@ -22,7 +21,8 @@ class SalespersonEarningEvent(Base):
       - gross_amount (e.g., plan price)
       - commission_amount (what salesperson earns)
       - currency
-      - event_type (TENANT_SIGNUP, SUBSCRIPTION_PAID, REFUND, ADJUSTMENT, ...)
+      - event_type (SUBSCRIPTION_PAID, REFUND, ADJUSTMENT, ...)
+      - external_ref (idempotency key: MpesaReceiptNumber / Stripe charge id)
       - metadata (JSONB) for receipts, policies, etc.
 
     NOTE:
@@ -31,13 +31,22 @@ class SalespersonEarningEvent(Base):
     """
 
     __tablename__ = "salesperson_earning_events"
+
     __table_args__ = (
+        # Performance indexes
         Index("ix_sales_earn_events_salesperson_occurred", "salesperson_profile_id", "occurred_at"),
         Index("ix_sales_earn_events_tenant", "tenant_id"),
         Index("ix_sales_earn_events_type", "event_type"),
+
+        # ✅ CRITICAL: Idempotency protection
+        UniqueConstraint("external_ref", name="uq_sales_external_ref"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
 
     salesperson_profile_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -53,19 +62,49 @@ class SalespersonEarningEvent(Base):
         index=True,
     )
 
-    # Examples: TENANT_SIGNUP, SUBSCRIPTION_PAID, REFUND, ADJUSTMENT
-    event_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    # Examples: SUBSCRIPTION_PAID, REFUND, ADJUSTMENT
+    event_type: Mapped[str] = mapped_column(
+        String(40),
+        nullable=False,
+        index=True,
+    )
 
-    currency: Mapped[str] = mapped_column(String(10), nullable=False, default="KES", server_default="KES")
+    currency: Mapped[str] = mapped_column(
+        String(10),
+        nullable=False,
+        default="KES",
+        server_default="KES",
+    )
 
     # Economic meaning:
-    # - gross_amount: what the customer paid / plan value (positive)
-    # - commission_amount: salesperson commission (can be negative for clawback/refund)
-    gross_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"), server_default="0.00")
-    commission_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    # - gross_amount: what the customer paid
+    # - commission_amount: salesperson commission
+    gross_amount: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        nullable=False,
+        default=Decimal("0.00"),
+        server_default="0.00",
+    )
 
-    # payment method that generated this: MPESA | STRIPE | MANUAL
-    source: Mapped[str] = mapped_column(String(20), nullable=False, default="MANUAL", server_default="MANUAL")
+    commission_amount: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        nullable=False,
+    )
+
+    # payment method: MPESA | STRIPE | MANUAL
+    source: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="MANUAL",
+        server_default="MANUAL",
+    )
+
+    # ✅ NEW: idempotency key (MpesaReceiptNumber / Stripe charge id)
+    external_ref: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        index=True,
+    )
 
     occurred_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -74,10 +113,9 @@ class SalespersonEarningEvent(Base):
         index=True,
     )
 
-    # free-form info (e.g., mpesa receipt, stripe charge id, policy snapshot)
-    # NOTE: attribute name cannot be "metadata" in SQLAlchemy Declarative
+    # free-form info (mpesa receipt, phone, etc.)
     event_metadata: Mapped[dict[str, Any]] = mapped_column(
-        "metadata",  # keep DB column name
+        "metadata",
         JSONB,
         nullable=False,
         default=dict,

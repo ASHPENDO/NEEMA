@@ -45,3 +45,12 @@ class SalesStatsOut(BaseModel):
     last_30d_commission: Decimal
 
     last_event_at: Optional[datetime] = None
+
+
+# ✅ NEW
+class SalespersonMeOut(BaseModel):
+    salesperson_profile_id: str
+    user_id: str
+    referral_code: str
+    is_active: bool
+    created_at: datetime

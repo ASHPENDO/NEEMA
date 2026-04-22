@@ -19,6 +19,8 @@ from app.api.v1.tenant_invitations import router as tenant_invitations_router
 from app.api.v1.platform_invitations import router as platform_invitations_router
 from app.api.v1.sales import router as sales_router
 from app.api.v1.platform_sales import router as platform_sales_router
+from app.api.v1.referrals import router as referrals_router
+from app.api.v1.mpesa import router as mpesa_router
 from app.api.v1.catalog import router as catalog_router, catalog_alias_router
 from app.api.v1.social_oauth import router as social_oauth_router
 from app.api.v1.facebook_catalog import router as facebook_catalog_router
@@ -108,6 +110,8 @@ def create_application() -> FastAPI:
     app.include_router(platform_invitations_router, prefix=api_prefix)
     app.include_router(sales_router, prefix=api_prefix)
     app.include_router(platform_sales_router, prefix=api_prefix)
+    app.include_router(referrals_router, prefix=api_prefix)
+    app.include_router(mpesa_router, prefix=api_prefix)
 
     # Catalog
     app.include_router(catalog_router, prefix=api_prefix)

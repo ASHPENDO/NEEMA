@@ -21,18 +21,22 @@ def normalize_referral_code(code: str | None) -> str | None:
     return c if REFERRAL_RE.match(c) else None
 
 
+# ✅ UPDATED: Tier-based commission (NOT percentage)
 def compute_commission_kes(
     *,
     tier: str,
-    gross_amount_kes: Decimal,
+    gross_amount_kes: Decimal | None = None,  # kept for compatibility
 ) -> Decimal:
-    """
-    Central policy. Adjust later without rewriting endpoints.
-    Current policy: flat 20% commission on the first payment amount.
-    """
-    _ = tier  # reserved for tier-based policies later
-    rate = Decimal("0.20")
-    return (gross_amount_kes * rate).quantize(Decimal("1.00"))
+    tier = (tier or "").strip().lower()
+
+    if tier == "sungura":
+        return Decimal("500.00")
+    elif tier == "swara":
+        return Decimal("1000.00")
+    elif tier == "ndovu":
+        return Decimal("2000.00")
+
+    return Decimal("0.00")
 
 
 async def resolve_salesperson_by_referral_code(

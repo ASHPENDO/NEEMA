@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import uuid
-from decimal import Decimal
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -17,13 +16,11 @@ from app.api.deps.tenant import (
 from app.api.deps.permissions import require_permissions
 from app.auth.permissions import Permission
 from app.core.sales_attribution import (
-    compute_commission_kes,
     normalize_referral_code,
     resolve_salesperson_by_referral_code,
     utcnow,
 )
 from app.db.session import get_db
-from app.models.salesperson_earning_event import SalespersonEarningEvent
 from app.models.tenant import Tenant
 from app.models.tenant_membership import TenantMembership
 from app.models.tenant_invitation import TenantInvitation  # ADDED
@@ -147,30 +144,6 @@ async def create_tenant(
     db.add(membership)
     await db.commit()
     await db.refresh(tenant)
-
-    if salesperson_profile:
-        gross_amount = Decimal("10000.00")
-        commission_amount = compute_commission_kes(
-            tier=str(tenant.tier),
-            gross_amount_kes=gross_amount,
-        )
-
-        event = SalespersonEarningEvent(
-            salesperson_profile_id=salesperson_profile.id,
-            tenant_id=tenant.id,
-            event_type="TENANT_SIGNUP",
-            currency="KES",
-            gross_amount=gross_amount,
-            commission_amount=commission_amount,
-            source="MANUAL",
-            occurred_at=utcnow(),
-            event_metadata={
-                "referral_code": normalized_code,
-                "tenant_tier": str(tenant.tier),
-            },
-        )
-        db.add(event)
-        await db.commit()
 
     return tenant
 
