@@ -85,18 +85,26 @@ class Settings(BaseSettings):
     # 🤖 AI (OPENAI)
     # -----------------------------
     OPENAI_API_KEY: str
-
-    FORCE_AI_FALLBACK: bool = True  # 🔥 toggle for dev
+    FORCE_AI_FALLBACK: bool = True
 
     # ==================================================
-    # 🔐 SAFE MODE (NEW — DOES NOT BREAK EXISTING LOGIC)
+    # 🔐 SAFE MODE
     # ==================================================
     SAFE_MODE: bool = True
     SAFE_PAGE_IDS: list[str] = ["1097989406733639"]
     SAFE_POST_INTERVAL: int = 120
     SAFE_ENABLE_SCHEDULER_POSTING: bool = True
     POSTING_MODE: str = "safe"
+
     # ==================================================
+    # 💰 MPESA (🔥 ADDED — NO REGRESSION)
+    # ==================================================
+    MPESA_ENV: str = "sandbox"  # sandbox | production
+    MPESA_CONSUMER_KEY: str
+    MPESA_CONSUMER_SECRET: str
+    MPESA_SHORTCODE: str
+    MPESA_PASSKEY: str
+    MPESA_CALLBACK_URL: str
 
     # -----------------------------
     # Derived Properties
@@ -126,7 +134,16 @@ class Settings(BaseSettings):
         return [s.strip() for s in (self.META_SCOPES or "").split(",") if s.strip()]
 
     # -----------------------------
-    # Validation (IMPORTANT — PRESERVED)
+    # 💰 MPESA Derived Helpers (🔥 NEW)
+    # -----------------------------
+    @property
+    def MPESA_BASE_URL(self) -> str:
+        if self.MPESA_ENV == "production":
+            return "https://api.safaricom.co.ke"
+        return "https://sandbox.safaricom.co.ke"
+
+    # -----------------------------
+    # Validation (PRESERVED)
     # -----------------------------
     def model_post_init(self, __context) -> None:
         env = (self.ENVIRONMENT or "").strip().lower()
