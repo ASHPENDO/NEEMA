@@ -1,137 +1,85 @@
-# app/services/payments.py
-from __future__ import annotations
-
-from decimal import Decimal
-from typing import Optional
-
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
-
-from app.models.tenant import Tenant
+from decimal import Decimal
 from app.models.salesperson_earning_event import SalespersonEarningEvent
-from app.models.salesperson_profile import SalespersonProfile
-from app.core.sales_attribution import compute_commission_kes, utcnow
 
-
-# ---------------------------------------------------------
-# PUBLIC: Payment success hook
-# ---------------------------------------------------------
 
 async def handle_subscription_payment_success(
-    *,
-    db: AsyncSession,
-    tenant_id,
+    db,
+    tenant_id: str,
     amount_kes: Decimal,
-    source: str = "MPESA",  # or STRIPE / MANUAL
-    metadata: Optional[dict] = None,
-) -> None:
-    """
-    Central hook for ALL successful payments.
+    source: str,
+    metadata: dict,
+):
+    external_ref = metadata.get("external_ref")
 
-    Idempotent:
-    - Uses external_ref (MpesaReceiptNumber / Stripe charge id)
-    - Safe against retries and race conditions
-    """
-
-    # -----------------------------------------------------
-    # 0. Extract idempotency key
-    # -----------------------------------------------------
-    external_ref = metadata.get("external_ref") if metadata else None
-
-    # -----------------------------------------------------
-    # 1. Load tenant
-    # -----------------------------------------------------
-    tenant: Tenant | None = await db.get(Tenant, tenant_id)
-    if not tenant:
-        return
-
-    # -----------------------------------------------------
-    # 2. Check attribution
-    # -----------------------------------------------------
-    if not tenant.salesperson_profile_id:
-        return
-
-    # -----------------------------------------------------
-    # 3. Load salesperson
-    # -----------------------------------------------------
-    sp: SalespersonProfile | None = await db.get(
-        SalespersonProfile,
-        tenant.salesperson_profile_id,
-    )
-
-    if not sp or not sp.is_active:
-        return
-
-    # -----------------------------------------------------
-    # 4. Early idempotency check (fast path)
-    # -----------------------------------------------------
+    # 🔒 1. IDEMPOTENCY GUARD (CRITICAL)
     if external_ref:
-        stmt = select(SalespersonEarningEvent).where(
-            SalespersonEarningEvent.external_ref == external_ref
+        existing = await db.execute(
+            select(SalespersonEarningEvent).where(
+                SalespersonEarningEvent.external_ref == external_ref
+            )
         )
-        existing = (await db.execute(stmt)).scalar_one_or_none()
+        if existing.scalar_one_or_none():
+            print(f"[IDEMPOTENT] Skipping duplicate payment: {external_ref}")
+            return
 
-        if existing:
-            return  # already processed
+    # 🔍 2. FETCH TENANT
+    from app.models.tenant import Tenant
 
-    # -----------------------------------------------------
-    # 5. Compute commission
-    # -----------------------------------------------------
-    commission_amount = compute_commission_kes(
-        tier=str(tenant.tier),
-        gross_amount_kes=amount_kes,
+    tenant_result = await db.execute(
+        select(Tenant).where(Tenant.id == tenant_id)
     )
+    tenant = tenant_result.scalar_one_or_none()
 
-    if commission_amount <= 0:
+    if not tenant:
+        print(f"[ERROR] Tenant not found: {tenant_id}")
         return
 
-    # -----------------------------------------------------
-    # 6. Create earning event
-    # -----------------------------------------------------
+    # 🔍 3. CHECK SALESPERSON LINK
+    salesperson_id = tenant.salesperson_profile_id
+    if not salesperson_id:
+        print(f"[INFO] No salesperson linked → no commission")
+        return
+
+    # 🔍 4. CHECK SALESPERSON ACTIVE
+    from app.models.salesperson_profile import SalespersonProfile
+
+    sp_result = await db.execute(
+        select(SalespersonProfile).where(
+            SalespersonProfile.id == salesperson_id
+        )
+    )
+    salesperson = sp_result.scalar_one_or_none()
+
+    if not salesperson or not salesperson.is_active:
+        print(f"[INFO] Salesperson inactive → no commission")
+        return
+
+    # 💰 5. COMMISSION CALCULATION (FIXED)
+    # Example: 10% commission
+    commission_rate = Decimal("0.10")
+    commission_amount = amount_kes * commission_rate
+
+    # 🧾 6. CREATE EARNING EVENT
     event = SalespersonEarningEvent(
-        salesperson_profile_id=sp.id,
-        tenant_id=tenant.id,
-        event_type="SUBSCRIPTION_PAID",
-        currency="KES",
+        salesperson_profile_id=salesperson_id,
+        tenant_id=tenant_id,
+        event_type="SUBSCRIPTION_PAYMENT",
         gross_amount=amount_kes,
         commission_amount=commission_amount,
         source=source,
-        occurred_at=utcnow(),
-        external_ref=external_ref,  # ✅ CRITICAL
-        event_metadata=metadata or {},
+        external_ref=external_ref,
+        metadata=metadata,
     )
 
-    # -----------------------------------------------------
-    # 7. Commit safely (race-condition safe)
-    # -----------------------------------------------------
+    db.add(event)
+
+    # 💾 7. COMMIT
     try:
-        db.add(event)
         await db.commit()
-    except IntegrityError:
+    except Exception as e:
         await db.rollback()
-        return  # duplicate safely ignored
+        print(f"[ERROR] Commit failed (likely duplicate): {e}")
+        return
 
-
-# ---------------------------------------------------------
-# OPTIONAL: (deprecated) helper
-# ---------------------------------------------------------
-
-async def has_existing_payment_event(
-    *,
-    db: AsyncSession,
-    tenant_id,
-    external_ref: str,
-) -> bool:
-    """
-    Deprecated: replaced by external_ref unique constraint.
-
-    Kept for backward compatibility.
-    """
-
-    stmt = select(SalespersonEarningEvent).where(
-        SalespersonEarningEvent.external_ref == external_ref
-    )
-
-    res = await db.execute(stmt)
-    return res.scalar_one_or_none() is not None
+    print(f"[SUCCESS] Commission recorded: {commission_amount}")

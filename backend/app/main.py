@@ -43,6 +43,9 @@ from app.services.scheduler import campaign_scheduler
 # AI
 from app.api.v1.ai import router as ai_router
 
+# Payments
+from app.api.v1 import payments
+
 # Social Accounts
 from app.api.v1.social_accounts import router as social_accounts_router
 
@@ -144,6 +147,9 @@ def create_application() -> FastAPI:
 
     # AI
     app.include_router(ai_router, prefix=api_prefix)
+
+    # Payments
+    app.include_router(payments.router, prefix="/api/v1/payments", tags=["payments"])
 
     # Social Accounts
     app.include_router(social_accounts_router, prefix=api_prefix)
