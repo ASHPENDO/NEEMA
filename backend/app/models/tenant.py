@@ -1,7 +1,7 @@
 # backend/app/models/tenant.py
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import String, Boolean, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
@@ -28,6 +28,23 @@ class Tenant(Base):
         ForeignKey("salesperson_profiles.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
+    )
+
+    # ✅ Subscription fields
+    subscription_status: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        default="trial",
+        # values: trial | active | expired
+    )
+    trial_ends_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        default=lambda: datetime.utcnow() + timedelta(days=7),
+    )
+    subscription_ends_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
     )
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

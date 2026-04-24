@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -23,7 +24,7 @@ from app.core.sales_attribution import (
 from app.db.session import get_db
 from app.models.tenant import Tenant
 from app.models.tenant_membership import TenantMembership
-from app.models.tenant_invitation import TenantInvitation  # ADDED
+from app.models.tenant_invitation import TenantInvitation
 from app.models.user import User
 from app.schemas.tenant import TenantCreate, TenantOut
 from app.schemas.tenant_membership import TenantMemberOut, TenantMemberUpdate
@@ -54,8 +55,6 @@ async def create_tenant(
         )
 
     # BLOCK: If this user has any unexpired tenant invitation, they must accept it first.
-    # This prevents invited workers (ADMIN/MANAGER/STAFF) from creating new tenants
-    # simply because they have zero memberships before acceptance.
     pending_inv_stmt = (
         select(func.count())
         .select_from(TenantInvitation)
@@ -73,12 +72,7 @@ async def create_tenant(
             },
         )
 
-    # ---------------------------------------------------------
-    # HARD RULE: A user who is already an active member of any tenant
-    # (ADMIN/MANAGER/STAFF) cannot create a new tenant.
-    # Only users with NO memberships can create a tenant (becoming OWNER),
-    # and OWNER is still limited to 1 owned tenant by the rule below.
-    # ---------------------------------------------------------
+    # HARD RULE: existing members cannot create a new tenant
     member_stmt = (
         select(func.count())
         .select_from(TenantMembership)
@@ -126,6 +120,9 @@ async def create_tenant(
         name=payload.name,
         tier=payload.tier,
         salesperson_profile_id=(salesperson_profile.id if salesperson_profile else None),
+        # ✅ SaaS lifecycle — start every tenant on a 7-day trial
+        subscription_status="trial",
+        trial_ends_at=datetime.utcnow() + timedelta(days=7),
     )
     db.add(tenant)
     await db.flush()

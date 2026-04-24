@@ -1,3 +1,5 @@
+# app/api/deps/tenant.py
+
 import uuid
 from typing import Optional
 
@@ -98,3 +100,33 @@ def require_tenant_roles(*allowed_roles: str):
         return membership
 
     return _checker
+
+
+def require_active_subscription(
+    tenant: Tenant = Depends(get_current_tenant),
+) -> Tenant:
+    """
+    Paywall gate. Raises HTTP 402 if tenant subscription is not active.
+
+    Usage:
+        tenant: Tenant = Depends(require_active_subscription)
+
+    Allowed status: "active" only.
+    Trial tenants ("trial") are also blocked — grant access during trial
+    by adding "trial" to the allowed set below when you're ready.
+
+    Returns the tenant so endpoints can use it directly without a
+    second Depends(get_current_tenant) call.
+    """
+    ALLOWED_STATUSES = {"active", "trial"}  # remove "trial" to enforce hard paywall after trial
+
+    if tenant.subscription_status not in ALLOWED_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "code": "subscription_required",
+                "message": "Your subscription has expired. Please renew to continue.",
+                "subscription_status": tenant.subscription_status,
+            },
+        )
+    return tenant

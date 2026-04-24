@@ -1,3 +1,5 @@
+# app/api/v1/catalog.py
+
 from __future__ import annotations
 
 import asyncio
@@ -16,9 +18,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps.permissions import require_permissions
-from app.api.deps.tenant import get_current_membership
+from app.api.deps.tenant import get_current_membership, require_active_subscription
 from app.db.session import get_db
 from app.models.catalog_item import CatalogItem
+from app.models.tenant import Tenant
 from app.schemas.catalog import (
     CatalogItemCreate,
     CatalogItemResponse,
@@ -34,6 +37,7 @@ router = APIRouter(prefix="/catalog/items", tags=["catalog"])
 catalog_alias_router = APIRouter(prefix="/catalog", tags=["catalog"])
 
 
+# ── READ: open to all active members (no paywall — viewing is free) ──────────
 @catalog_alias_router.get("/", response_model=List[CatalogItemResponse])
 async def list_catalog_items_alias(
     db: AsyncSession = Depends(get_db),
@@ -50,7 +54,7 @@ async def list_catalog_items_alias(
 
 
 # ------------------------------------------------------------------
-# Helpers
+# Helpers (unchanged)
 # ------------------------------------------------------------------
 
 _PRICE_RE = re.compile(r"(KSh|KES|Sh|UGX|TZS|TSh)\s*([0-9][0-9,\.]*)", flags=re.IGNORECASE)
@@ -743,7 +747,6 @@ async def _try_woocommerce_store_api(
                 if isinstance(image_url, str):
                     image_url = image_url.strip() or None
 
-        # ── Strip HTML from WooCommerce short_description and description ─────
         raw_desc = item.get("short_description") or item.get("description")
         description = _clean_scraped_text(raw_desc)
 
@@ -892,6 +895,7 @@ def _ingest_products_dicts(
 # CRUD
 # ------------------------------------------------------------------
 
+# ── READ: open to expired users — viewing catalog costs nothing ───────────────
 @router.get("", response_model=List[CatalogItemResponse])
 async def list_catalog_items(
     db: AsyncSession = Depends(get_db),
@@ -905,28 +909,6 @@ async def list_catalog_items(
     )
     result = await db.execute(stmt)
     return result.scalars().all()
-
-
-@router.post("", response_model=CatalogItemResponse, status_code=status.HTTP_201_CREATED)
-async def create_catalog_item(
-    payload: CatalogItemCreate,
-    db: AsyncSession = Depends(get_db),
-    membership=Depends(get_current_membership),
-    _=Depends(require_permissions("catalog:create")),
-):
-    item = _make_item(
-        membership=membership,
-        title=payload.title,
-        description=payload.description,
-        sku=payload.sku,
-        image_url=payload.image_url,
-        price_amount=payload.price_amount,
-        price_currency=normalize_currency(payload.price_currency),
-    )
-    db.add(item)
-    await db.commit()
-    await db.refresh(item)
-    return item
 
 
 @router.get("/{item_id}", response_model=CatalogItemResponse)
@@ -947,6 +929,30 @@ async def get_catalog_item(
     return item
 
 
+# ── WRITE: paywalled — requires active or trial subscription ──────────────────
+@router.post("", response_model=CatalogItemResponse, status_code=status.HTTP_201_CREATED)
+async def create_catalog_item(
+    payload: CatalogItemCreate,
+    db: AsyncSession = Depends(get_db),
+    membership=Depends(get_current_membership),
+    _=Depends(require_permissions("catalog:create")),
+    tenant: Tenant = Depends(require_active_subscription),  # ✅ paywall
+):
+    item = _make_item(
+        membership=membership,
+        title=payload.title,
+        description=payload.description,
+        sku=payload.sku,
+        image_url=payload.image_url,
+        price_amount=payload.price_amount,
+        price_currency=normalize_currency(payload.price_currency),
+    )
+    db.add(item)
+    await db.commit()
+    await db.refresh(item)
+    return item
+
+
 @router.patch("/{item_id}", response_model=CatalogItemResponse)
 async def update_catalog_item(
     item_id: uuid.UUID,
@@ -954,6 +960,7 @@ async def update_catalog_item(
     db: AsyncSession = Depends(get_db),
     membership=Depends(get_current_membership),
     _=Depends(require_permissions("catalog:update")),
+    tenant: Tenant = Depends(require_active_subscription),  # ✅ paywall
 ):
     stmt = select(CatalogItem).where(
         CatalogItem.id == item_id,
@@ -983,6 +990,7 @@ async def delete_catalog_item(
     db: AsyncSession = Depends(get_db),
     membership=Depends(get_current_membership),
     _=Depends(require_permissions("catalog:delete")),
+    tenant: Tenant = Depends(require_active_subscription),  # ✅ paywall
 ):
     stmt = select(CatalogItem).where(
         CatalogItem.id == item_id,
@@ -998,16 +1006,14 @@ async def delete_catalog_item(
     return None
 
 
-# ------------------------------------------------------------------
-# Scrape — adaptive multi-strategy
-# ------------------------------------------------------------------
-
+# ── SCRAPE: paywalled — premium cost center ───────────────────────────────────
 @router.post("/scrape", response_model=CatalogScrapeResponse, status_code=status.HTTP_201_CREATED)
 async def scrape_catalog_items(
     payload: CatalogScrapeRequest,
     db: AsyncSession = Depends(get_db),
     membership=Depends(get_current_membership),
     _=Depends(require_permissions("catalog:create")),
+    tenant: Tenant = Depends(require_active_subscription),  # ✅ paywall
 ):
     url = str(payload.url)
     root = _site_root(url)
@@ -1018,9 +1024,6 @@ async def scrape_catalog_items(
     fetched_pages = 0
     mode_used = "unknown"
 
-    # ── http2=False: avoids ImportError when h2 package is absent ────────────
-    # Install httpx[http2] and set http2=True for better performance on
-    # sites that support HTTP/2 (run: pip install httpx[http2])
     async with httpx.AsyncClient(
         timeout=httpx.Timeout(30.0, connect=12.0),
         follow_redirects=True,

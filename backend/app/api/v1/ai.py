@@ -1,16 +1,20 @@
+# app/api/v1/ai.py
+
 from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
 from typing import Optional, Any, Dict, List
 
 from app.db.session import get_db
+from app.models.tenant import Tenant
 from app.services.ai_content_service import AIContentService
+from app.api.deps.tenant import require_active_subscription
 
 router = APIRouter(prefix="/ai", tags=["AI"])
 
 
 # ==============================
-# REQUEST SCHEMAS (FIXED)
+# REQUEST SCHEMAS
 # ==============================
 class AIGenerateRequest(BaseModel):
     product_id: Optional[str] = Field(None, description="Single product ID")
@@ -26,17 +30,13 @@ class RegenerateRequest(BaseModel):
 
 
 # ==============================
-# RESPONSE NORMALIZER (SAFE)
+# RESPONSE NORMALIZER
 # ==============================
 def normalize_ai_response(result: Any) -> Dict[str, Any]:
     """
     Ensures response is always structured.
-    Handles:
-    - New JSON format
-    - Old string format (backward compatibility)
+    Handles new JSON format and old string format (backward compatibility).
     """
-
-    # ✅ Already structured
     if isinstance(result, dict):
         return {
             "hook": result.get("hook", ""),
@@ -47,7 +47,6 @@ def normalize_ai_response(result: Any) -> Dict[str, Any]:
             or f"{result.get('hook', '')}\n\n{result.get('body', '')}\n\n{result.get('cta', '')}".strip(),
         }
 
-    # ⚠️ Old string fallback
     if isinstance(result, str):
         return {
             "hook": "",
@@ -57,27 +56,26 @@ def normalize_ai_response(result: Any) -> Dict[str, Any]:
             "full_caption": result,
         }
 
-    # ❌ Unexpected
     raise ValueError("Invalid AI response format")
 
 
 # ==============================
-# GENERATE FULL AI CONTENT (FIXED)
+# GENERATE FULL AI CONTENT
 # ==============================
 @router.post("/generate")
 async def generate_ai_content(
     payload: AIGenerateRequest = Body(...),
     db: AsyncSession = Depends(get_db),
+    tenant: Tenant = Depends(require_active_subscription),  # ✅ paywall
 ):
     try:
-        # 🔥 VALIDATION (CRITICAL FIX)
         if not payload.product_id and not payload.product_ids:
             raise ValueError("At least one product is required")
 
         raw_result = await AIContentService.generate(
             db=db,
             product_id=payload.product_id,
-            product_ids=payload.product_ids,  # ✅ NEW
+            product_ids=payload.product_ids,
             template_id=payload.template_id,
         )
 
@@ -100,15 +98,15 @@ async def generate_ai_content(
 
 
 # ==============================
-# 🔥 PARTIAL REGENERATION (UNCHANGED BUT SAFE)
+# PARTIAL REGENERATION
 # ==============================
 @router.post("/regenerate")
 async def regenerate_section(
     payload: RegenerateRequest,
     db: AsyncSession = Depends(get_db),
+    tenant: Tenant = Depends(require_active_subscription),  # ✅ paywall
 ):
     try:
-        # Validate section
         if payload.section not in {"hook", "body", "cta"}:
             raise ValueError("Invalid section. Must be 'hook', 'body', or 'cta'.")
 
