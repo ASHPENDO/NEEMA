@@ -51,6 +51,7 @@ async def get_current_tenant(
         TenantMembership.is_active.is_(True),
     )
     membership = (await db.execute(stmt)).scalar_one_or_none()
+
     if not membership:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -66,7 +67,8 @@ async def get_current_membership(
     user: User = Depends(get_current_user),
 ) -> TenantMembership:
     """
-    Fetch the active membership for (user, tenant). Safe after get_current_tenant.
+    Fetch the active membership for (user, tenant).
+    Safe after get_current_tenant.
     """
     stmt = select(TenantMembership).where(
         TenantMembership.tenant_id == tenant.id,
@@ -79,30 +81,37 @@ async def get_current_membership(
 
 def require_tenant_roles(*allowed_roles: str):
     """
-    Enforce membership.role is in allowed_roles. (OWNER/ADMIN/STAFF)
+    Enforce membership.role is in allowed_roles.
+    Example:
+        Depends(require_tenant_roles("OWNER", "ADMIN"))
     """
     allowed = {r.upper() for r in allowed_roles}
     unknown = allowed - ALLOWED_TENANT_ROLES
+
     if unknown:
         raise ValueError(
-            f"Unknown tenant role(s): {sorted(unknown)}. Allowed: {sorted(ALLOWED_TENANT_ROLES)}"
+            f"Unknown tenant role(s): {sorted(unknown)}. "
+            f"Allowed: {sorted(ALLOWED_TENANT_ROLES)}"
         )
 
     async def _checker(
         membership: TenantMembership = Depends(get_current_membership),
     ) -> TenantMembership:
         role = (membership.role or "").upper()
+
         if role not in allowed:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Insufficient role: {role}. Allowed: {', '.join(sorted(allowed))}",
             )
+
         return membership
 
     return _checker
 
 
-def require_active_subscription(
+# ✅ CRITICAL: must be async for FastAPI dependency chain stability
+async def require_active_subscription(
     tenant: Tenant = Depends(get_current_tenant),
 ) -> Tenant:
     """
@@ -111,14 +120,15 @@ def require_active_subscription(
     Usage:
         tenant: Tenant = Depends(require_active_subscription)
 
-    Allowed status: "active" only.
-    Trial tenants ("trial") are also blocked — grant access during trial
-    by adding "trial" to the allowed set below when you're ready.
+    Allowed statuses:
+        - "active"
+        - "trial" (remove to enforce strict paywall)
 
-    Returns the tenant so endpoints can use it directly without a
-    second Depends(get_current_tenant) call.
+    Returns:
+        Tenant (so no need to call get_current_tenant again)
     """
-    ALLOWED_STATUSES = {"active", "trial"}  # remove "trial" to enforce hard paywall after trial
+
+    ALLOWED_STATUSES = {"active", "trial"}  # remove "trial" for hard paywall
 
     if tenant.subscription_status not in ALLOWED_STATUSES:
         raise HTTPException(
@@ -129,4 +139,5 @@ def require_active_subscription(
                 "subscription_status": tenant.subscription_status,
             },
         )
+
     return tenant

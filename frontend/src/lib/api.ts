@@ -2,6 +2,7 @@
 import axios from "axios";
 import { tokenStorage } from "./storage";
 import { activeTenantStorage } from "./tenantStorage";
+import { triggerPaywall } from "@/lib/paywall";
 
 export type ApiErrorShape = {
   status: number;
@@ -81,6 +82,22 @@ client.interceptors.request.use((config) => {
 
   return config;
 });
+
+// --------------------------------------------------
+// RESPONSE INTERCEPTOR — global 402 paywall trigger
+// --------------------------------------------------
+client.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    const status = error?.response?.status;
+
+    if (status === 402) {
+      triggerPaywall(); // 🔥 opens PaywallModal globally via event bus
+    }
+
+    return Promise.reject(error); // always propagate so ApiError still throws
+  }
+);
 
 // --------------------------------------------------
 // api() — pure transport, interceptor handles headers
