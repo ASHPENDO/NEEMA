@@ -49,46 +49,64 @@ async def mpesa_callback(request: Request):
 
     try:
         stk_callback = payload["Body"]["stkCallback"]
+
         result_code = stk_callback.get("ResultCode")
         checkout_request_id = stk_callback.get("CheckoutRequestID")
 
-        # ❌ Failed payment — acknowledge and exit
+        # ❌ FAILED PAYMENT
         if result_code != 0:
-            print(f"[MPESA FAILED] ResultCode={result_code} | {stk_callback}")
+            print(f"[MPESA FAILED] ResultCode={result_code}")
             return {"status": "failed"}
 
         metadata_items = stk_callback.get("CallbackMetadata", {}).get("Item", [])
 
         def get_value(name):
             for item in metadata_items:
-                if item["Name"] == name:
+                if item.get("Name") == name:
                     return item.get("Value")
             return None
 
-        amount  = get_value("Amount")
+        amount = get_value("Amount")
         receipt = get_value("MpesaReceiptNumber")
-        phone   = get_value("PhoneNumber")
+        phone = str(get_value("PhoneNumber"))
+
+        # 🔥 CRITICAL: use AccountReference (tenant_id)
+        tenant_id = stk_callback.get("AccountReference")
+
+        if not tenant_id:
+            print("[CALLBACK ERROR] Missing AccountReference (tenant_id)")
+            return {"status": "missing_tenant"}
 
         async with async_session_maker() as db:
-            # ── Look up tenant by phone number ──────────────────────────
-            # Callback doesn't return tenant_id reliably, so match by phone
+
+            # =========================
+            # 🔍 FETCH TENANT
+            # =========================
             result = await db.execute(
-                select(Tenant).where(Tenant.phone_number == str(phone))
+                select(Tenant).where(Tenant.id == tenant_id)
             )
             tenant = result.scalar_one_or_none()
 
             if not tenant:
-                print(f"[CALLBACK] Tenant not found for phone={phone}")
+                print(f"[CALLBACK] Tenant not found: {tenant_id}")
                 return {"status": "tenant_not_found"}
 
-            # ✅ Activate subscription
+            # =========================
+            # 🔥 PERSIST PHONE (NEW)
+            # =========================
+            tenant.billing_phone_number = phone
+
+            # =========================
+            # ✅ ACTIVATE SUBSCRIPTION
+            # =========================
             tenant.subscription_status = "active"
             tenant.subscription_ends_at = datetime.utcnow() + timedelta(days=365)
-            await db.commit()
 
-            print(f"[CALLBACK] Subscription activated for tenant {tenant.id}")
+            print(f"[CALLBACK] Activated tenant {tenant.id}")
 
-            # ── Record commission event ──────────────────────────────────
+            # =========================
+            # 💰 RECORD COMMISSION EVENT
+            # =========================
             await handle_subscription_payment_success(
                 db=db,
                 tenant_id=str(tenant.id),
@@ -101,6 +119,9 @@ async def mpesa_callback(request: Request):
                     "external_ref": checkout_request_id,
                 },
             )
+
+            # 🔥 SINGLE COMMIT (VERY IMPORTANT)
+            await db.commit()
 
         print(f"[MPESA SUCCESS] {checkout_request_id}")
         return {"status": "success"}

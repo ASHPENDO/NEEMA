@@ -1,9 +1,16 @@
 import { motion } from "framer-motion";
-import { useNavigate } from "react-router-dom";
+import { PaymentStatus } from "./PaymentStatus";
 
-export function PaywallModal({ open, onClose }: any) {
-  const navigate = useNavigate();
-
+export function PaywallModal({
+  open,
+  onClose,
+  onPay,
+  loading,
+  status,
+  phone,
+  setPhone,
+  hasPhone,
+}: any) {
   if (!open) return null;
 
   return (
@@ -19,13 +26,30 @@ export function PaywallModal({ open, onClose }: any) {
           Your subscription has expired. Renew to continue.
         </p>
 
+        {/* 📱 Phone input if missing */}
+        {!hasPhone && (
+          <input
+            type="text"
+            placeholder="Enter phone (2547XXXXXXXX)"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            className="mt-4 w-full border rounded-lg px-3 py-2"
+          />
+        )}
+
+        {/* 💳 Pay button */}
         <button
-          onClick={() => navigate("/billing")}
+          onClick={onPay}
+          disabled={loading}
           className="mt-4 w-full bg-black text-white py-2 rounded-xl"
         >
-          Go to Billing
+          {loading ? "Processing..." : "Pay with M-PESA"}
         </button>
 
+        {/* 📊 Status */}
+        <PaymentStatus status={status} />
+
+        {/* Close */}
         <button onClick={onClose} className="mt-3 text-sm text-gray-500">
           Close
         </button>
