@@ -3,29 +3,32 @@
 Revision ID: f543681546b8
 Revises: a1b605b1836f
 Create Date: 2026-04-25 12:31:34.009470
-
 """
+
 from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
 
 
-# revision identifiers
-revision: str = 'f543681546b8'
-down_revision: Union[str, None] = 'a1b605b1836f'
+# revision identifiers, used by Alembic.
+revision: str = "f543681546b8"
+down_revision: Union[str, None] = "a1b605b1836f"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # =========================
+    # 🧾 CREATE PAYMENTS TABLE
+    # =========================
     op.create_table(
         "payments",
 
-        # 🔑 PK
+        # 🔑 Primary Key
         sa.Column("id", sa.String(), primary_key=True),
 
-        # 🔗 Relationship
+        # 🔗 Tenant relationship (multi-tenant isolation)
         sa.Column("tenant_id", sa.String(), nullable=False),
 
         # 📌 MPESA identifiers
@@ -43,28 +46,60 @@ def upgrade() -> None:
         sa.Column("result_code", sa.Integer(), nullable=True),
         sa.Column("result_desc", sa.String(), nullable=True),
 
-        # 🧾 Audit
+        # 🧾 Raw payload for audit/debug
         sa.Column("raw_callback", sa.JSON(), nullable=True),
 
         # ⏱️ Timestamps
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            nullable=True,
+        ),
 
-        # 🔒 UNIQUE constraint (idempotency)
+        # 🔒 Idempotency guarantee (critical)
         sa.UniqueConstraint(
             "checkout_request_id",
-            name="uq_payments_checkout_request_id"
+            name="uq_payments_checkout_request_id",
         ),
     )
 
-    # 🔍 Indexes (separate — safer)
-    op.create_index("ix_payments_tenant_id", "payments", ["tenant_id"])
-    op.create_index("ix_payments_status", "payments", ["status"])
-    op.create_index("ix_payments_checkout_request_id", "payments", ["checkout_request_id"])
+    # =========================
+    # 🔍 INDEXES
+    # =========================
+    op.create_index(
+        "ix_payments_tenant_id",
+        "payments",
+        ["tenant_id"],
+    )
+
+    op.create_index(
+        "ix_payments_status",
+        "payments",
+        ["status"],
+    )
+
+    op.create_index(
+        "ix_payments_checkout_request_id",
+        "payments",
+        ["checkout_request_id"],
+    )
 
 
 def downgrade() -> None:
+    # =========================
+    # 🔻 DROP INDEXES
+    # =========================
     op.drop_index("ix_payments_checkout_request_id", table_name="payments")
     op.drop_index("ix_payments_status", table_name="payments")
     op.drop_index("ix_payments_tenant_id", table_name="payments")
+
+    # =========================
+    # 🔻 DROP TABLE
+    # =========================
     op.drop_table("payments")
