@@ -1,17 +1,21 @@
 # backend/app/api/v1/payments.py
 
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Depends, Request, HTTPException
 from pydantic import BaseModel
 from datetime import datetime, timedelta
 from decimal import Decimal
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.session import async_session_maker
+from app.db.session import get_db, async_session_maker
 from app.models.tenant import Tenant
+from app.models.payment import Payment
 from app.services.payments import (
     handle_subscription_payment_success,
     initiate_stk_push,
 )
+from app.utils.phone import normalize_ke_phone
+from app.core.deps import get_current_tenant  # adjust path to your project
 
 router = APIRouter()
 
@@ -26,15 +30,80 @@ class STKPushRequest(BaseModel):
 
 
 # =========================
+# 📋 LIST PAYMENTS ENDPOINT
+# =========================
+@router.get("/")
+async def list_payments(
+    db: AsyncSession = Depends(get_db),
+    tenant: Tenant = Depends(get_current_tenant),
+):
+    result = await db.execute(
+        select(Payment)
+        .where(Payment.tenant_id == tenant.id)
+        .order_by(Payment.created_at.desc())
+    )
+
+    payments = result.scalars().all()
+
+    return [
+        {
+            "id": p.id,
+            "amount": p.amount,
+            "status": p.status,
+            "phone": p.phone,
+            "receipt": p.mpesa_receipt_number,
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+        }
+        for p in payments
+    ]
+
+
+# =========================
 # 📲 STK PUSH ENDPOINT
 # =========================
+# ✅ Normalize at boundary; pass db so service can write pending Payment row
 @router.post("/mpesa/stk-push")
-async def stk_push(payload: STKPushRequest):
+async def stk_push(
+    payload: STKPushRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        normalized_phone = normalize_ke_phone(payload.phone)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     return await initiate_stk_push(
-        phone=payload.phone,
+        phone=normalized_phone,
         amount=payload.amount,
-        tenant_id=payload.tenant_id,
+        tenant_id=payload.tenant_id,  # must be tenant_id, NOT user_id
+        db=db,
     )
+
+
+# =========================
+# 📊 PAYMENT STATUS ENDPOINT
+# =========================
+# Frontend polls this after STK push to get deterministic success/failure
+@router.get("/status/{checkout_request_id}")
+async def get_payment_status(
+    checkout_request_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Payment).where(
+            Payment.checkout_request_id == checkout_request_id
+        )
+    )
+    payment = result.scalar_one_or_none()
+
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+
+    return {
+        "status": payment.status,           # pending | success | failed
+        "result_code": payment.result_code,
+        "result_desc": payment.result_desc,
+    }
 
 
 # =========================
@@ -53,31 +122,82 @@ async def mpesa_callback(request: Request):
         result_code = stk_callback.get("ResultCode")
         checkout_request_id = stk_callback.get("CheckoutRequestID")
 
-        # ❌ FAILED PAYMENT
-        if result_code != 0:
-            print(f"[MPESA FAILED] ResultCode={result_code}")
-            return {"status": "failed"}
-
-        metadata_items = stk_callback.get("CallbackMetadata", {}).get("Item", [])
-
-        def get_value(name):
-            for item in metadata_items:
-                if item.get("Name") == name:
-                    return item.get("Value")
-            return None
-
-        amount = get_value("Amount")
-        receipt = get_value("MpesaReceiptNumber")
-        phone = str(get_value("PhoneNumber"))
-
-        # 🔥 CRITICAL: use AccountReference (tenant_id)
-        tenant_id = stk_callback.get("AccountReference")
-
-        if not tenant_id:
-            print("[CALLBACK ERROR] Missing AccountReference (tenant_id)")
-            return {"status": "missing_tenant"}
-
         async with async_session_maker() as db:
+
+            # =========================
+            # 🔍 FIND PAYMENT ROW FIRST
+            # =========================
+            payment_result = await db.execute(
+                select(Payment).where(
+                    Payment.checkout_request_id == checkout_request_id
+                )
+            )
+            payment = payment_result.scalar_one_or_none()
+
+            # ❌ FAILED PAYMENT — update ledger and stop
+            if result_code != 0:
+                print(f"[MPESA FAILED] ResultCode={result_code}")
+                if payment:
+                    payment.status = "failed"
+                    payment.result_code = result_code
+                    payment.result_desc = stk_callback.get("ResultDesc")
+                    payment.raw_callback = payload
+                    await db.commit()
+                return {"status": "failed"}
+
+            # ✅ SUCCESSFUL PAYMENT — extract metadata
+            metadata_items = stk_callback.get("CallbackMetadata", {}).get("Item", [])
+
+            def get_value(name):
+                for item in metadata_items:
+                    if item.get("Name") == name:
+                        return item.get("Value")
+                return None
+
+            amount = int(get_value("Amount") or 0)
+            receipt = get_value("MpesaReceiptNumber")
+            raw_phone = str(get_value("PhoneNumber"))
+
+            try:
+                phone = normalize_ke_phone(raw_phone)
+            except ValueError:
+                print(f"[PHONE WARNING] Could not normalize: {raw_phone}")
+                phone = raw_phone  # Safaricom should always send 254XXXXXXXXX
+
+            # AccountReference holds tenant_id (set during STK push)
+            tenant_id = stk_callback.get("AccountReference")
+
+            if not tenant_id:
+                print("[CALLBACK ERROR] Missing AccountReference (tenant_id)")
+                return {"status": "missing_tenant"}
+
+            # =========================
+            # ✅ UPDATE PAYMENT LEDGER
+            # =========================
+            if payment:
+                payment.status = "success"
+                payment.result_code = result_code
+                payment.result_desc = "Success"
+                payment.mpesa_receipt_number = receipt
+                payment.raw_callback = payload
+            else:
+                # Safaricom fired callback before STK response was committed (rare race)
+                # Insert the row now so polling still resolves correctly
+                print(f"[CALLBACK WARNING] No Payment row for {checkout_request_id} — inserting fallback")
+                from uuid import uuid4
+                payment = Payment(
+                    id=str(uuid4()),
+                    tenant_id=tenant_id,
+                    checkout_request_id=checkout_request_id,
+                    phone=phone,
+                    amount=amount,
+                    status="success",
+                    result_code=result_code,
+                    result_desc="Success",
+                    mpesa_receipt_number=receipt,
+                    raw_callback=payload,
+                )
+                db.add(payment)
 
             # =========================
             # 🔍 FETCH TENANT
@@ -92,7 +212,7 @@ async def mpesa_callback(request: Request):
                 return {"status": "tenant_not_found"}
 
             # =========================
-            # 🔥 PERSIST PHONE (NEW)
+            # 🔥 PERSIST BILLING PHONE
             # =========================
             tenant.billing_phone_number = phone
 
@@ -120,7 +240,7 @@ async def mpesa_callback(request: Request):
                 },
             )
 
-            # 🔥 SINGLE COMMIT (VERY IMPORTANT)
+            # 🔥 SINGLE COMMIT — everything above lands atomically
             await db.commit()
 
         print(f"[MPESA SUCCESS] {checkout_request_id}")
